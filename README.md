@@ -24,8 +24,6 @@ app.py                      the Streamlit web app (streamlit run app.py)
 style.css                   the look of the app (colors, track lists)
 data/sample_tracks.csv      14 made-up rows for testing the loader
 data/sample_lastfm_chart.json   a made-up 10-song chart for testing the chart job
-exercises/week1.sql         your week 1 SQL exercises
-WEEK2.md                    week 2 step-by-step guide
 ```
 
 ## Setup (one time)
