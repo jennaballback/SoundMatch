@@ -13,9 +13,9 @@ docker-compose.yml          Postgres 16 in Docker
 requirements.txt            Python packages
 sql/001_schema.sql          the data model: every table, with comments explaining why
 sql/002_transform_catalog.sql   turns the raw CSV into clean tables
-sql/003_transform_chart.sql     week 2, you write it: raw Last.fm JSON -> chart_entries
-sql/004_match_chart.sql         week 2, you write it: link chart songs to catalog tracks
-sql/005_similar_songs.sql       week 3: the similar_songs() search function
+sql/003_transform_chart.sql     raw Last.fm JSON -> chart_entries
+sql/004_match_chart.sql         link chart songs to catalog tracks
+sql/005_similar_songs.sql       the similar_songs() search function
 sql/006_track_language.sql      best guess at each song's language (run before 005)
 pipelines/load_catalog.py   the catalog loader (runs 001 and 002)
 pipelines/fetch_chart.py    the daily chart job (runs 001, 003 and 004)
