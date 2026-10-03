@@ -1,0 +1,7 @@
+.env
+.venv/
+__pycache__/
+# The Kaggle CSV is ~20 MB; keep it out of git. The small sample stays in.
+data/*.csv
+!data/sample_tracks.csv
+logs/

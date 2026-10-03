@@ -1,0 +1,72 @@
+/* The look of the web app. app.py loads this file with st.html(). */
+
+html, body, h1, h2, h3, p, label, input, .banner, .tracklist {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+}
+[data-testid="stSidebar"] { background-color: #000000; }
+[data-testid="stHeader"] { background: transparent; }
+
+/* Search boxes: rounded pills like a music app's search bar */
+[data-testid="stTextInput"] input {
+    border-radius: 500px;
+    padding-left: 1.2rem;
+}
+
+/* The big colored banner at the top of each page */
+.banner {
+    background: linear-gradient(180deg, #1f6f43 0%, #121212 100%);
+    border-radius: 8px;
+    padding: 2.2rem 1.5rem 1.5rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+.banner .kicker { font-size: 0.8rem; font-weight: 600; color: #ffffff; }
+.banner .title  { font-size: 2.6rem; font-weight: 800; line-height: 1.1; margin: 0.3rem 0; color: #ffffff; }
+.banner .sub    { color: #b3b3b3; font-size: 0.95rem; }
+
+/* Track lists: one row per song, number on the left, title over artist */
+.tracklist, .tracklist tr, .tracklist th, .tracklist td { border: none !important; }
+.tracklist { width: 100%; border-collapse: collapse; }
+.tracklist th {
+    color: #b3b3b3; font-weight: 400; font-size: 0.8rem; text-align: left;
+    border-bottom: 1px solid #2a2a2a !important; padding: 0.4rem 0.6rem;
+}
+.tracklist th:last-child { text-align: right; }
+.tracklist td { padding: 0.5rem 0.6rem; }
+.tracklist tr:hover td { background-color: #2a2a2a; }
+.tracklist .num   { color: #b3b3b3; width: 2.5rem; text-align: right; }
+.tracklist .song  { color: #ffffff; font-weight: 600; text-decoration: none; }
+.tracklist .song:hover { text-decoration: underline; }
+/* The number turns into a green play button when you point at the row */
+.tracklist .play { display: none; color: #1ed760; text-decoration: none; }
+.tracklist tr:hover .idx  { display: none; }
+.tracklist tr:hover .play { display: inline; }
+.tracklist .artist { color: #b3b3b3; font-size: 0.85rem; margin-top: 0.1rem; }
+.tracklist .right { color: #b3b3b3; text-align: right; white-space: nowrap; }
+.tracklist .lang  { color: #b3b3b3; white-space: nowrap; }
+.tracklist .match { color: #1ed760; font-weight: 600; text-align: right; white-space: nowrap; }
+.dot { color: #1ed760; }
+
+/* The SoundMatch name in the sidebar */
+.brand { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.03em; color: #ffffff; line-height: 1; }
+.brand span { color: #1ed760; }
+.tagline { color: #b3b3b3; font-size: 0.95rem; margin: 0.35rem 0 1.4rem 0; }
+
+/* Sidebar menu: turn the radio buttons into a music-app style menu.
+   The little circles are hidden, and the chosen page gets a gray pill.
+   These rules only use parts every Streamlit version has (the radio
+   group, its labels, and the checked input), so they work on old and new. */
+[data-testid="stSidebar"] [data-testid="stElementContainer"]:has([role="radiogroup"]),
+[data-testid="stSidebar"] [data-testid="stRadio"],
+[data-testid="stSidebar"] [role="radiogroup"],
+[data-testid="stSidebar"] [role="radiogroup"] > div { width: 100% !important; }
+[data-testid="stSidebar"] [role="radiogroup"] { display: flex; flex-direction: column; gap: 0.3rem; }
+[data-testid="stSidebar"] [role="radiogroup"] label {
+    width: 100%; margin: 0; padding: 0.7rem 1rem; border-radius: 8px; cursor: pointer;
+}
+/* Hide every piece of the option except the text (that's the circle) */
+[data-testid="stSidebar"] [role="radiogroup"] label div:not([data-testid="stMarkdownContainer"]):not(:has([data-testid="stMarkdownContainer"])):not([data-testid="stMarkdownContainer"] *) { display: none; }
+[data-testid="stSidebar"] [role="radiogroup"] label > div { padding-left: 0; }
+[data-testid="stSidebar"] [role="radiogroup"] label p { font-size: 1.2rem; font-weight: 700; color: #b3b3b3; }
+[data-testid="stSidebar"] [role="radiogroup"] label:hover p { color: #ffffff; }
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) { background-color: #242424; }
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p { color: #ffffff; }

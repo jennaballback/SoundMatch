@@ -1,0 +1,304 @@
+{
+  "_note": "MADE-UP SAMPLE for testing, shaped like a real geo.getTopTracks response. Listener counts are invented.",
+  "tracks": {
+    "track": [
+      {
+        "name": "Blinding Lights",
+        "duration": "0",
+        "listeners": "1843201",
+        "mbid": "",
+        "url": "https://www.last.fm/music/The+Weeknd/_/Blinding+Lights",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "The Weeknd",
+          "mbid": "",
+          "url": "https://www.last.fm/music/The+Weeknd"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "0"
+        }
+      },
+      {
+        "name": "As It Was",
+        "duration": "0",
+        "listeners": "1612044",
+        "mbid": "",
+        "url": "https://www.last.fm/music/Harry+Styles/_/As+It+Was",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "Harry Styles",
+          "mbid": "",
+          "url": "https://www.last.fm/music/Harry+Styles"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "1"
+        }
+      },
+      {
+        "name": "Die With A Smile",
+        "duration": "0",
+        "listeners": "1500321",
+        "mbid": "",
+        "url": "https://www.last.fm/music/Lady+Gaga/_/Die+With+A+Smile",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "Lady Gaga",
+          "mbid": "",
+          "url": "https://www.last.fm/music/Lady+Gaga"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "2"
+        }
+      },
+      {
+        "name": "bad guy",
+        "duration": "0",
+        "listeners": "1455102",
+        "mbid": "",
+        "url": "https://www.last.fm/music/Billie+Eilish/_/bad+guy",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "Billie Eilish",
+          "mbid": "",
+          "url": "https://www.last.fm/music/Billie+Eilish"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "3"
+        }
+      },
+      {
+        "name": "Levitating (feat. DaBaby)",
+        "duration": "0",
+        "listeners": "1320877",
+        "mbid": "",
+        "url": "https://www.last.fm/music/Dua+Lipa/_/Levitating+(feat.+DaBaby)",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "Dua Lipa",
+          "mbid": "",
+          "url": "https://www.last.fm/music/Dua+Lipa"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "4"
+        }
+      },
+      {
+        "name": "Mr. Brightside",
+        "duration": "0",
+        "listeners": "1298310",
+        "mbid": "",
+        "url": "https://www.last.fm/music/The+Killers/_/Mr.+Brightside",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "The Killers",
+          "mbid": "",
+          "url": "https://www.last.fm/music/The+Killers"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "5"
+        }
+      },
+      {
+        "name": "Espresso",
+        "duration": "0",
+        "listeners": "1250466",
+        "mbid": "",
+        "url": "https://www.last.fm/music/Sabrina+Carpenter/_/Espresso",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "Sabrina Carpenter",
+          "mbid": "",
+          "url": "https://www.last.fm/music/Sabrina+Carpenter"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "6"
+        }
+      },
+      {
+        "name": "Heat Waves",
+        "duration": "0",
+        "listeners": "1101985",
+        "mbid": "",
+        "url": "https://www.last.fm/music/Glass+Animals/_/Heat+Waves",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "Glass Animals",
+          "mbid": "",
+          "url": "https://www.last.fm/music/Glass+Animals"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "7"
+        }
+      },
+      {
+        "name": "Shape of You",
+        "duration": "0",
+        "listeners": "1087654",
+        "mbid": "",
+        "url": "https://www.last.fm/music/Ed+Sheeran/_/Shape+of+You",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "Ed Sheeran",
+          "mbid": "",
+          "url": "https://www.last.fm/music/Ed+Sheeran"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "8"
+        }
+      },
+      {
+        "name": "Stay",
+        "duration": "0",
+        "listeners": "998812",
+        "mbid": "",
+        "url": "https://www.last.fm/music/The+Kid+LAROI/_/Stay",
+        "streamable": {
+          "#text": "0",
+          "fulltrack": "0"
+        },
+        "artist": {
+          "name": "The Kid LAROI",
+          "mbid": "",
+          "url": "https://www.last.fm/music/The+Kid+LAROI"
+        },
+        "image": [
+          {
+            "#text": "",
+            "size": "small"
+          },
+          {
+            "#text": "",
+            "size": "medium"
+          }
+        ],
+        "@attr": {
+          "rank": "9"
+        }
+      }
+    ],
+    "@attr": {
+      "country": "United States",
+      "page": "1",
+      "perPage": "10",
+      "totalPages": "1",
+      "total": "10"
+    }
+  }
+}

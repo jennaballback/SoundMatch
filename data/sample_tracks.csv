@@ -1,0 +1,15 @@
+,track_id,artists,album_name,track_name,popularity,duration_ms,explicit,danceability,energy,key,loudness,mode,speechiness,acousticness,instrumentalness,liveness,valence,tempo,time_signature,track_genre
+0,0SampleTrack000000001,The Midnight Owls,Neon Harbor,Neon Harbor,72,214000,False,0.71,0.82,5,-5.1,1,0.041,0.08,0.0001,0.12,0.78,122.0,4,pop
+1,0SampleTrack000000002,The Midnight Owls;Luna Vale,Neon Harbor,Paper Satellites,65,198500,False,0.66,0.77,7,-6.0,1,0.052,0.11,0.0,0.18,0.69,118.5,4,pop
+2,0SampleTrack000000003,Luna Vale,Quiet Rooms,Slow Tide,48,251000,False,0.38,0.21,2,-13.4,0,0.035,0.91,0.12,0.09,0.22,74.0,4,acoustic
+3,0SampleTrack000000004,Rex Carter;DJ Nova;Mika Sol,Block Party,Run It Back,81,176000,True,0.88,0.74,1,-4.2,1,0.21,0.03,0.0,0.33,0.61,98.0,4,hip-hop
+4,0SampleTrack000000004,Rex Carter;DJ Nova;Mika Sol,Block Party,Run It Back,81,176000,True,0.88,0.74,1,-4.2,1,0.21,0.03,0.0,0.33,0.61,98.0,4,dance
+5,0SampleTrack000000005,DJ Nova,Afterglow,Afterglow,58,302000,False,0.79,0.9,9,-3.8,0,0.06,0.002,0.76,0.2,0.4,126.0,4,edm
+6,0SampleTrack000000006,Hollow Pines,Cold Front,"Cold Front, Pt. 2",39,289000,False,0.29,0.93,4,-4.9,0,0.09,0.0004,0.3,0.25,0.18,168.0,4,metal
+7,0SampleTrack000000007,Mika Sol,Sunday Best,Honey Light,70,203000,False,0.74,0.55,0,-7.1,1,0.045,0.35,0.0,0.1,0.85,104.0,4,r-n-b
+8,0SampleTrack000000008,Luna Vale,Quiet Rooms,Paper Lanterns,44,233000,False,0.42,0.25,2,-12.8,1,0.033,0.88,0.05,0.11,0.31,80.0,3,acoustic
+9,0SampleTrack000000009,The Midnight Owls,Neon Harbor,Static Hearts,61,221000,False,0.69,0.8,5,-5.5,1,0.044,0.1,0.0,0.14,0.72,120.0,4,pop
+10,0SampleTrack000000010,Rex Carter,Block Party,Late Checkout,55,188000,True,0.83,0.66,11,-5.9,0,0.28,0.12,0.0,0.19,0.47,92.0,4,hip-hop
+11,0SampleTrack000000011,,,,0,0,False,0.5,0.5,0,-10.0,1,0.05,0.5,0.0,0.1,0.5,100.0,4,k-pop
+12,0SampleTrack000000012,Hollow Pines;Hollow Pines,Cold Front,Ice Age,33,312000,False,0.25,0.95,6,-4.1,0,0.1,0.0001,0.45,0.3,0.12,172.0,4,metal
+13,0SampleTrack000000001,The Midnight Owls,Neon Harbor,Neon Harbor,72,214000,False,0.71,0.82,5,-5.1,1,0.041,0.08,0.0001,0.12,0.78,122.0,4,synth-pop

@@ -1,0 +1,8 @@
+# Streamlit reads this file automatically when you run "streamlit run app.py"
+# from the project folder. These colors give the app its dark look.
+[theme]
+base = "dark"
+primaryColor = "#1ED760"
+backgroundColor = "#121212"
+secondaryBackgroundColor = "#242424"
+textColor = "#FFFFFF"
