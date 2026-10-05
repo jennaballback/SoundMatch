@@ -15,7 +15,7 @@ Kaggle CSV   --COPY-->  staging.kaggle_tracks    --002-->  tracks, artists, trac
                                                                     |
 Last.fm API  --daily--> staging.lastfm_chart_raw --003-->  chart_entries --004--> matched to tracks
                                                                     |
-                                       similar_songs() (005) + language (006)
+                                       similar_songs() (005) + language (006) + ranks (007)
                                                                     |
                                                           Streamlit app (app.py)
 ```
@@ -36,8 +36,8 @@ Stack: Postgres 16 in Docker, Python 3 with psycopg 3, Streamlit.
 
 **Unmatched chart songs are kept, not dropped.** Last.fm and Spotify share no id, so chart songs are matched to the catalog on name and main artist. When the catalog has several versions of a song (single, album, deluxe), I pick the most popular one with `DISTINCT ON`. `chart_entries.track_id` stays `NULL` when there's no match, so no chart data is lost. Right now about 29% of the chart matches, because most current hits were released after the catalog ends.
 
-**Similarity as a SQL function.** `similar_songs()` computes Euclidean distance over eight audio features. Tempo and loudness are on different scales from the 0 to 1 features, so I scale them (`tempo / 250`, `(loudness + 60) / 60`) to keep either from dominating. A few rules came out of testing real searches:
-- Songs that share no genre with the seed get a 0.2 penalty. I started at 0.1, but it was too weak (Kid Rock still came up for Dua Lipa).
+**Similarity as a SQL function.** `similar_songs()` computes Euclidean distance over eight audio features. The raw features are spread very unevenly (most songs sit between 0.5 and 0.9 on energy, while valence covers the whole 0 to 1 range), so `sql/007_ranked_features.sql` replaces six of them with their percentile rank among all songs, stored in a materialized view. That way a step of 0.1 means the same thing for every feature. Speechiness and instrumentalness keep their raw values, because most songs score near 0 on both and ranking would blow tiny differences up. A few rules came out of testing real searches:
+- Songs that share no genre with the seed get a penalty. I started at 0.1, but it was too weak (Kid Rock still came up for Dua Lipa), so I raised it to 0.2, and then to 0.3 once ranking spread the songs further apart.
 - Results are deduplicated by name and artist, and anything at distance 0 is hidden, since that's the same recording under another title.
 - There's an optional "same language only" filter.
 
@@ -59,6 +59,7 @@ sql/003_transform_chart.sql     raw Last.fm JSON -> chart_entries
 sql/004_match_chart.sql         link chart songs to catalog tracks
 sql/005_similar_songs.sql       the similar_songs() search function
 sql/006_track_language.sql      best guess at each song's language (run before 005)
+sql/007_ranked_features.sql     features as percentile ranks, a materialized view (run before 005)
 pipelines/load_catalog.py       catalog loader (runs 001 and 002)
 pipelines/fetch_chart.py        daily chart job (runs 001, 003 and 004)
 pipelines/run_daily.bat         the script Windows Task Scheduler runs each morning
@@ -83,6 +84,7 @@ python pipelines/load_catalog.py data/dataset.csv
 
 # Language guesses and the search function
 docker compose exec -T db psql -U music < sql/006_track_language.sql
+docker compose exec -T db psql -U music < sql/007_ranked_features.sql
 docker compose exec -T db psql -U music < sql/005_similar_songs.sql
 
 # Today's chart (or --file data/sample_lastfm_chart.json to test offline)

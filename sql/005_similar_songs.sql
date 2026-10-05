@@ -16,10 +16,14 @@
 --     for same-language songs only.
 -- Version 3 also returns each song's track_id, so the web app can link
 -- every result to Spotify.
+-- Version 4 compares songs on the fair 0-to-1 ranks from
+-- 007_ranked_features.sql instead of the raw numbers, so every feature
+-- counts equally. Ranks spread songs out more, so the genre penalty went
+-- up from 0.2 to 0.3 to keep the same push.
 --
 -- The DROP is needed because the function's inputs and outputs changed,
 -- and CREATE OR REPLACE can only replace a function with the same shape.
--- Run 006_track_language.sql before this file.
+-- Run 006_track_language.sql and 007_ranked_features.sql before this file.
 -- =====================================================================
 
 DROP FUNCTION IF EXISTS similar_songs(text, integer);
@@ -32,7 +36,7 @@ LANGUAGE sql STABLE
 AS $$
 WITH seed AS (
   SELECT f.*, t.name AS seed_name, t.language AS seed_language
-  FROM audio_features f
+  FROM features_ranked f
   JOIN tracks t ON t.track_id = f.track_id
   WHERE f.track_id = seed_id
 ),
@@ -51,11 +55,11 @@ scored AS (
       + power(f.acousticness     - s.acousticness, 2)
       + power(f.speechiness      - s.speechiness, 2)
       + power(f.instrumentalness - s.instrumentalness, 2)
-      + power(f.tempo / 250      - s.tempo / 250, 2)
-      + power((f.loudness + 60) / 60 - (s.loudness + 60) / 60, 2)
-      + power(CASE WHEN sg.track_id IS NULL THEN 0.2 ELSE 0 END, 2)  -- no shared genre
+      + power(f.tempo            - s.tempo, 2)
+      + power(f.loudness         - s.loudness, 2)
+      + power(CASE WHEN sg.track_id IS NULL THEN 0.3 ELSE 0 END, 2)  -- no shared genre
     )::numeric, 3) AS distance
-  FROM audio_features f
+  FROM features_ranked f
   CROSS JOIN seed s
   JOIN tracks t ON t.track_id = f.track_id
   JOIN track_artists ta ON ta.track_id = f.track_id AND ta.position = 1
