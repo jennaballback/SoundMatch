@@ -1,56 +1,54 @@
 # SoundMatch
 
-SoundMatch is a music data app I built on Postgres. It does two things:
+Type in a song and SoundMatch finds tracks with a similar feel, matched on energy, mood, tempo, danceability and more. It also records the US top 100 every day, and it can search this week's new hits even though they're newer than its song data.
 
-1. **Tracks the US top 100 every day.** A scheduled job pulls the Last.fm US chart each morning and stores it as a dated snapshot, so the history builds up over time instead of being overwritten.
-2. **Finds songs that sound alike.** Type in a song and it returns the closest matches by audio features (energy, danceability, valence, tempo and so on) from a catalog of about 90,000 Spotify tracks. Every result links to Spotify, and the song you searched plays in an embedded player.
+Behind the app is an end-to-end data project I built from the ground up: a daily data pipeline, a Postgres database of about 90,000 songs, a similarity search written in SQL, a machine learning model that fills in missing data, and a web app that ties it all together.
+
+### Features
+- **Search as you type.** Song suggestions with album covers appear as you type. Pick one to get a ranked list of the closest matches, each with a match score, a Spotify link and a built-in player.
+- **A daily chart history.** Every morning a scheduled job saves the Last.fm US top 100 as a dated snapshot, so the history of the chart builds up over time.
+- **New releases, too.** The song dataset ends in 2022, so most of today's hits aren't in it. For each one, the pipeline grabs a 30-second preview, measures its tempo, loudness and key, and uses a model I trained to predict how it sounds. That way, brand-new songs can be searched alongside everything else.
 
 ## Architecture
-
-Raw data lands untouched in a `staging` schema (the Kaggle CSV via `COPY`, each day's Last.fm response as `jsonb`), and SQL scripts transform it into a normalized model: tracks, artists, genres, audio features and dated chart entries. A Python job run daily by Windows Task Scheduler extracts the chart, loads it and runs the transform and matching SQL in one transaction, while the similarity search lives in the database as a SQL function. A Streamlit front end queries Postgres directly for the search page and the daily chart page.
-
+ 
+Raw data lands untouched in a `staging` schema (the Kaggle CSV via `COPY`, each day's Last.fm response as `jsonb`), and SQL scripts transform it into a normalized model: tracks, artists, genres, audio features and dated chart entries. A Python job run daily by Windows Task Scheduler extracts the chart, loads it and runs the transform and matching SQL in one transaction, then estimates audio features for any chart songs the catalog doesn't have, while the similarity search lives in the database as a SQL function. A Streamlit front end queries Postgres directly for the search page and the daily chart page.
+ 
 ```
 Kaggle CSV   --COPY-->  staging.kaggle_tracks    --002-->  tracks, artists, track_artists,
                                                            genres, track_genres, audio_features
                                                                     |
 Last.fm API  --daily--> staging.lastfm_chart_raw --003-->  chart_entries --004--> matched to tracks
                                                                     |
+                              unmatched songs: Deezer preview -> librosa -> mood model
+                              -> added to tracks as "estimated" (analyze_chart_songs.py)
+                                                                    |
                                        similar_songs() (005) + language (006)
                                                                     |
                                                           Streamlit app (app.py)
 ```
-
-Stack: Postgres 16 in Docker, Python 3 with psycopg 3, Streamlit.
+ 
+Stack: Postgres 16 in Docker, Python 3 with psycopg 3, Streamlit, scikit-learn and librosa. Data comes from Kaggle, Last.fm and Deezer, all free.
 
 ## Design decisions
-
-**Where the data comes from.** The Spotify API would have been the obvious source, but in late 2024 Spotify closed audio features, recommendations and editorial playlists to new apps. So the catalog and audio features come from the [Kaggle Spotify Tracks dataset](https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset), and the chart comes from Last.fm's `geo.getTopTracks`. The trade-off is that the Kaggle data stops around 2022, which shows up in the chart matching below.
-
-**Staging first, all text (ELT).** The CSV lands in a table where every column is text, so one bad value can't break the load. Types are cast in SQL afterwards. Last.fm responses are kept as raw `jsonb` for the same reason: if the API changes shape or my transform has a bug, I can fix the SQL and re-run it without calling the API again.
-
-**Idempotent loads.** Every insert uses `ON CONFLICT`, and each load runs in a single transaction. Running the catalog load or the daily chart job twice gives the same result as running it once, and a failure halfway rolls everything back. That matters for a scheduled job: if it runs twice on the same day, or I re-run it by hand after a failure, nothing gets duplicated.
-
-**Natural vs. surrogate keys.** Tracks use Spotify's own track id as the primary key, since it's stable and it lets every song link straight to Spotify. Artists have no id in the data, so Postgres generates one and the artist name is treated as unique (a known simplification: two real artists can share a name). Chart entries are keyed on `(chart_date, rank)`, which is what makes re-loading a day safe.
-
-**Bridge tables for many-to-many.** The CSV stores artists as `"A;B;C"` in one cell, and a song can appear under several genres. Those are split into `track_artists` and `track_genres`, so "every song by B" is a simple join.
-
-**Unmatched chart songs are kept, not dropped.** Last.fm and Spotify share no id, so chart songs are matched to the catalog on name and main artist. When the catalog has several versions of a song (single, album, deluxe), I pick the most popular one with `DISTINCT ON`. `chart_entries.track_id` stays `NULL` when there's no match, so no chart data is lost. Right now about 29% of the chart matches, because most current hits were released after the catalog ends.
-
-**Similarity as a SQL function.** `similar_songs()` computes Euclidean distance over eight audio features. Tempo and loudness are on different scales from the 0 to 1 features, so I scale them (`tempo / 250`, `(loudness + 60) / 60`) to keep either from dominating. A few rules came out of testing real searches:
-- Songs that share no genre with the seed get a 0.2 penalty. I started at 0.1, but it was too weak (Kid Rock still came up for Dua Lipa).
-- Results are deduplicated by name and artist, and anything at distance 0 is hidden, since that's the same recording under another title.
-- There's an optional "same language only" filter.
-
-Keeping it in the database means psql, the command-line script and the web app all run the same query.
-
-**Inferring language.** The dataset has no language column, so `sql/006_track_language.sql` makes a best guess in order of confidence: the title's script (Korean, Japanese, Cyrillic, Devanagari and so on), instrumentalness for instrumental tracks, language-specific genres (k-pop, sertanejo, pop-film for Indian film songs), then the artist's usual language, and finally English as a fallback. It's a heuristic with known misses: a Punjabi or Italian song filed under plain "pop" can still be guessed as English.
+ 
+**Data sources after Spotify closed its API.** Spotify stopped giving new apps audio features and recommendations in late 2024. So the song catalog and its audio features come from the [Kaggle Spotify Tracks dataset](https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset), the daily chart comes from Last.fm, and previews and album covers come from Deezer. All three are free.
+ 
+**Raw data first, safe to re-run.** Everything lands untouched in a `staging` schema (the CSV as all-text columns, each day's API response as raw `jsonb`) and is cleaned with SQL afterwards. If the API changes shape or my transform has a bug, I fix the SQL and re-run it without calling the API again. Every load runs in one transaction with `ON CONFLICT` upserts, so running the daily job twice, or re-running it after a failure, never duplicates data.
+ 
+**Similarity search lives in the database.** `similar_songs()` is a SQL function that ranks songs by Euclidean distance over eight audio features. Tempo and loudness are rescaled so they don't outweigh the 0 to 1 features. Testing real searches led to a few rules: songs that share no genre with the one you picked get a penalty (0.1 was too weak, since Kid Rock still came up for Dua Lipa, so it's 0.2), duplicate versions of a song are hidden, and there's an optional "same language only" filter based on a language guess I built in SQL. Because the logic is in the database, psql, the command-line script and the web app all get the same results.
+ 
+**Measuring before trusting a model.** Only about 29% of the chart matched the catalog, because most hits came out after 2022. To estimate audio features for the rest, I compared each approach with a "lazy guess" baseline (always predict the average), using mean error on six mood scores:
+- Free local LLMs (llama3.2 and llama3.1:8b) did *worse* than the lazy guess (0.243 and 0.229 vs 0.198), so I dropped them.
+- A scikit-learn model trained on my own catalog, using tempo, loudness, key, mode, length and genre, halved the error (0.108 vs 0.201 on 5,000 songs it never saw).
+- The full chain on real 30-second previews (Deezer clip, measured with librosa, then the model) first lost to the baseline. The cause was that librosa measured songs about 6 dB quieter than Spotify. After correcting that offset, it beat the baseline on all six scores (0.120 vs 0.178).
+Estimated songs are marked `source = 'estimated'`, and the app labels them so it's clear their scores are guesses.
 
 ## How I built this with Claude
 
 I used Claude as a pair programmer throughout. I directed the project: what to build, what to leave out, and which trade-offs to make when the data didn't cooperate. Claude drafted the code and explained the options. I reviewed each piece, ran everything on my own machine (Docker, the daily scheduled job, the app) and tested the results against real searches. Several design decisions came out of that testing, like raising the genre penalty, hiding zero-distance duplicates and adding the language filter.
 
 ## Project layout
-
+ 
 ```
 docker-compose.yml              Postgres 16 in Docker
 sql/001_schema.sql              the data model, with comments on each table
@@ -63,32 +61,40 @@ pipelines/load_catalog.py       catalog loader (runs 001 and 002)
 pipelines/fetch_chart.py        daily chart job (runs 001, 003 and 004)
 pipelines/run_daily.bat         the script Windows Task Scheduler runs each morning
 pipelines/similar_songs.py      command-line version of the search
+pipelines/llm_accuracy_check.py tests free local LLMs at guessing audio features
+pipelines/train_mood_model.py   trains the audio-feature model on the catalog
+pipelines/analyze_chart_songs.py  estimates features for chart songs not in the catalog
 app.py, style.css, .streamlit/  the Streamlit web app
+song_search/index.html          the search box with live suggestions and covers
 data/                           small sample files for testing without the real data
 ```
 
 ## Run it locally
 
 You need Docker and Python 3.10 or newer. [SETUP.md](SETUP.md) has a step-by-step version for Windows and Mac.
-
+ 
 ```bash
 docker compose up -d                       # start Postgres
 python -m venv .venv
 source .venv/bin/activate                  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env                       # add a free Last.fm API key
-
+ 
 # Catalog: download dataset.csv from the Kaggle link above into data/
 python pipelines/load_catalog.py data/dataset.csv
-
+ 
 # Language guesses and the search function
 docker compose exec -T db psql -U music < sql/006_track_language.sql
 docker compose exec -T db psql -U music < sql/005_similar_songs.sql
-
+ 
 # Today's chart (or --file data/sample_lastfm_chart.json to test offline)
 python pipelines/fetch_chart.py
-
+ 
+# Train the audio-feature model, then fill in chart songs the catalog doesn't have
+python pipelines/train_mood_model.py
+python pipelines/analyze_chart_songs.py
+ 
 streamlit run app.py
 ```
-
+ 
 To try it without downloading anything, `python pipelines/load_catalog.py data/sample_tracks.csv` loads a small made-up sample.
