@@ -1,4 +1,4 @@
-"""SoundMatch: the music project web app.
+﻿"""SoundMatch: the music project web app.
 
 Run it with:
     streamlit run app.py
@@ -13,6 +13,8 @@ The dark theme colors live in .streamlit/config.toml. The rest of the look
 Playing songs: the song you search gets a Spotify player under the header,
 and every song title in a list opens that song on Spotify in a new tab.
 The catalog came from Spotify, so its track_id is the real Spotify id.
+Chart songs added by pipelines/analyze_chart_songs.py have ids like
+"deezer:12345" instead, so they get Deezer's player and a Spotify search link.
 """
 
 import html
@@ -29,17 +31,26 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 DSN = os.environ.get("DATABASE_URL", "postgresql://music:music@localhost:5432/music")
 
-# Same lookup as pipelines/similar_songs.py: the most popular song whose
-# name (and artist, if given) contains what you typed.
-FIND_SONG_SQL = """
-SELECT t.track_id, t.name, a.name AS artist, t.language
-FROM tracks t
-JOIN track_artists ta ON ta.track_id = t.track_id AND ta.position = 1
-JOIN artists a ON a.artist_id = ta.artist_id
-WHERE t.name ILIKE %s
-  AND a.name ILIKE %s
-ORDER BY t.popularity DESC
-LIMIT 1
+# Songs to suggest while you type. Every word you typed has to appear
+# somewhere in "song name + artist", so "bli" finds Blinding Lights and
+# blink-182, and "lights weeknd" finds Blinding Lights too.
+# DISTINCT ON keeps one copy of each name + artist (the catalog lists some
+# songs several times, once per genre), the most popular one. Then songs
+# whose name starts with what you typed come first, most popular first.
+SUGGEST_SQL = """
+SELECT track_id, name, artist, language
+FROM (
+    SELECT DISTINCT ON (lower(t.name), lower(a.name))
+           t.track_id, t.name, a.name AS artist, t.language, t.popularity,
+           t.name ILIKE %(starts)s AS name_starts
+    FROM tracks t
+    JOIN track_artists ta ON ta.track_id = t.track_id AND ta.position = 1
+    JOIN artists a ON a.artist_id = ta.artist_id
+    WHERE t.name || ' ' || a.name ILIKE ALL (%(words)s)
+    ORDER BY lower(t.name), lower(a.name), t.popularity DESC NULLS LAST
+) AS matches
+ORDER BY name_starts DESC, popularity DESC NULLS LAST, name
+LIMIT 8
 """
 
 SIMILAR_SQL = "SELECT name, artist, language, distance, track_id FROM similar_songs(%s, %s, %s)"
@@ -58,16 +69,38 @@ ORDER BY c.rank
 """
 
 
-def run_query(sql: str, params: tuple = ()) -> list[tuple]:
+def run_query(sql: str, params: tuple | dict = ()) -> list[tuple]:
     with psycopg.connect(DSN) as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
 
 
+def like_pattern(text: str) -> str:
+    # In ILIKE, % and _ are wildcards. A backslash in front makes them plain
+    # characters, so typing "100%" looks for a real percent sign.
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def suggest_songs(text: str) -> list[dict]:
+    words = [f"%{like_pattern(w)}%" for w in text.split()]
+    if not words:
+        return []
+    rows = run_query(SUGGEST_SQL, {"words": words, "starts": like_pattern(text) + "%"})
+    return [{"track_id": r[0], "name": r[1], "artist": r[2], "language": r[3] or ""}
+            for r in rows]
+
+
+# The search box with suggestions is a small web page of its own,
+# song_search/index.html. declare_component lets Streamlit show it and
+# get back what you typed and which song you clicked.
+song_search_box = components.declare_component("song_search", path=str(ROOT / "song_search"))
+
+
 def spotify_link(track_id: str | None, name: str, artist: str) -> str:
     # A catalog song links straight to its Spotify page. A chart song that
-    # isn't in the catalog has no Spotify id, so it links to a Spotify search.
-    if track_id:
+    # isn't in the catalog, or was added from Deezer, has no Spotify id, so
+    # it links to a Spotify search.
+    if track_id and not track_id.startswith("deezer:"):
         return f"https://open.spotify.com/track/{track_id}"
     return "https://open.spotify.com/search/" + quote(f"{name} {artist}")
 
@@ -104,10 +137,17 @@ def tracklist(headers: list[str], rows: list[list[str]]) -> None:
 def show_similar(track_id: str, name: str, artist: str, language: str,
                  how_many: int, same_language: bool) -> None:
     rows = run_query(SIMILAR_SQL, (track_id, how_many, same_language))
-    banner("SOUNDS LIKE", name, f"{artist}  -  {language}  -  {len(rows)} songs")
-    # Spotify's own player. It plays a 30 second preview, or the whole song
-    # if you're logged in to Spotify in this browser.
-    components.iframe(f"https://open.spotify.com/embed/track/{track_id}?theme=0", height=152)
+    if track_id.startswith("deezer:"):
+        banner("SOUNDS LIKE", name,
+               f"{artist}  -  {language}  -  {len(rows)} songs  -  mood scores estimated")
+        # Deezer's player, with the same 30 second preview the scores came from.
+        deezer_id = track_id.removeprefix("deezer:")
+        components.iframe(f"https://widget.deezer.com/widget/dark/track/{deezer_id}", height=152)
+    else:
+        banner("SOUNDS LIKE", name, f"{artist}  -  {language}  -  {len(rows)} songs")
+        # Spotify's own player. It plays a 30 second preview, or the whole song
+        # if you're logged in to Spotify in this browser.
+        components.iframe(f"https://open.spotify.com/embed/track/{track_id}?theme=0", height=152)
     # A distance of 0 is identical. Turn it into a friendlier "% match"
     # (distance 0.05 shows as 95%).
     tracklist(
@@ -139,19 +179,30 @@ if page == "Search":
     banner("SEARCH", "Find similar songs",
            "Type a song and get back songs that sound like it. The catalog stops around 2022.")
 
-    left, middle, right = st.columns([3, 3, 2])
-    song = left.text_input("Song", placeholder="What do you want to listen to?")
-    artist = middle.text_input("Artist (optional)", placeholder="Any artist")
+    left, right = st.columns([3, 1])
+    with left:
+        # What the box sent last time (None before you type anything).
+        # Streamlit keeps it in session_state under the box's key.
+        last = st.session_state.get("song_search") or {}
+        typed = last.get("query") or ""
+        # Give the box the songs that match what you typed. It shows them
+        # as a list under itself, with album covers.
+        picked = song_search_box(
+            suggestions=suggest_songs(typed) if typed and not last.get("pick") else [],
+            for_query=typed,
+            start_text=typed,
+            key="song_search",
+            default=None,
+        )
     how_many = right.slider("How many", min_value=5, max_value=50, value=10)
     same_language = st.toggle("Same language only")
 
+    song = (picked or {}).get("pick")
     if song:
-        found = run_query(FIND_SONG_SQL, (f"%{song}%", f"%{artist}%"))
-        if not found:
-            st.warning(f'No song matching "{song}" in the catalog. Try part of the name.')
-        else:
-            track_id, name, found_artist, language = found[0]
-            show_similar(track_id, name, found_artist, language, how_many, same_language)
+        show_similar(song["track_id"], song["name"], song["artist"], song["language"],
+                     how_many, same_language)
+    elif typed:
+        st.caption("Pick a song from the list to see songs that sound like it.")
 
 # ---------------------------------------------------------------------
 # Page 2: the daily Last.fm chart

@@ -1,4 +1,4 @@
-"""Type in a song, get back songs that sound like it.
+﻿"""Type in a song, get back songs that sound like it.
 
 Usage:
     python pipelines/similar_songs.py "blinding lights"

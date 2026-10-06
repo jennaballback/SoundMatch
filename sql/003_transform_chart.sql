@@ -53,5 +53,17 @@
 --     python pipelines/fetch_chart.py --file data/sample_lastfm_chart.json --date 2026-09-20
 -- and SELECT chart_date, count(*) FROM chart_entries GROUP BY 1;
 -- =====================================================================
+INSERT INTO chart_entries (chart_date, rank, lastfm_track_name, lastfm_artist_name, listeners)
+SELECT r.chart_date,
+       (t.track -> '@attr' ->> 'rank')::int + 1,
+       t.track ->> 'name',
+       t.track -> 'artist' ->> 'name',
+       (t.track ->> 'listeners')::int
+FROM staging.lastfm_chart_raw r
+CROSS JOIN LATERAL jsonb_array_elements(r.payload -> 'tracks' -> 'track') AS t(track)
+ON CONFLICT (chart_date, rank) DO UPDATE
+SET lastfm_track_name  = EXCLUDED.lastfm_track_name,
+    lastfm_artist_name = EXCLUDED.lastfm_artist_name,
+    listeners          = EXCLUDED.listeners;
 
 

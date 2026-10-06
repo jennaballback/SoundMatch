@@ -1,4 +1,4 @@
-/* The look of the web app. app.py loads this file with st.html(). */
+﻿/* The look of the web app. app.py loads this file with st.html(). */
 
 html, body, h1, h2, h3, p, label, input, .banner, .tracklist {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;

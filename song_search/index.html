@@ -1,0 +1,239 @@
+﻿<!DOCTYPE html>
+<style>
+  html, body {
+    margin: 0; padding: 0; background: transparent; color: #ffffff;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+  label { display: block; font-size: 14px; margin: 0 0 8px 0; color: #ffffff; }
+  input {
+    box-sizing: border-box; width: 100%; height: 40px;
+    padding: 0 1.2rem; font-size: 16px; color: #ffffff;
+    background: #242424; border: 1px solid transparent; border-radius: 500px;
+    outline: none; font-family: inherit;
+  }
+  input:focus { border-color: #1ed760; }
+  input::placeholder { color: #8a8a8a; }
+  ul {
+    list-style: none; margin: 6px 0 0 0; padding: 4px; display: none;
+    background: #1c1c1c; border: 1px solid #2a2a2a; border-radius: 8px;
+  }
+  ul.open { display: block; }
+  li {
+    display: flex; align-items: center; gap: 12px; height: 52px;
+    padding: 0 8px; border-radius: 6px; cursor: pointer;
+  }
+  li.active { background: #2a2a2a; }
+  .cover {
+    width: 40px; height: 40px; flex: none; border-radius: 4px; overflow: hidden;
+    background: #333333; color: #8a8a8a; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cover img { width: 100%; height: 100%; object-fit: cover; }
+  .text { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; }
+  .artist { color: #b3b3b3; }
+  .empty { color: #b3b3b3; cursor: default; font-size: 14px; }
+</style>
+<label for="box">Song</label>
+<input id="box" type="text" autocomplete="off" spellcheck="false" placeholder="What do you want to listen to?">
+<ul id="list"></ul>
+
+<script>
+  // The SoundMatch search box. app.py shows this page inside the Search page.
+  //
+  // How it works:
+  // 1. You type. After a short pause, this page sends what you typed to app.py.
+  // 2. app.py looks up matching songs in Postgres and sends them back here.
+  // 3. This page lists them under the box, each with its album cover.
+  // 4. Click a song (or use the arrow keys and Enter) and app.py shows
+  // songs that sound like it.
+  //
+  // The album covers come from Deezer's free web API (no key needed).
+  // The catalog has no pictures stored, so each cover is looked up once by
+  // song name and artist and then remembered while the page is open.
+
+  const box = document.getElementById("box");
+  const list = document.getElementById("list");
+
+  let suggestions = [];   // the songs app.py sent for the current text
+  let active = 0;         // which row the arrow keys are on
+  let open = false;       // is the list showing?
+  let timer = null;
+  let ready = false;
+
+  // ---- Talking to Streamlit -------------------------------------------
+  // Streamlit puts this page in a frame and talks to it with messages.
+  function send(type, data) {
+    window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data), "*");
+  }
+  function sendValue(value) {
+    send("streamlit:setComponentValue", {value: value, dataType: "json"});
+  }
+  function setHeight() {
+    send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 4});
+  }
+
+  // Every time app.py runs, Streamlit sends the latest suggestions here.
+  window.addEventListener("message", function (event) {
+    if (!event.data || event.data.type !== "streamlit:render") return;
+    const args = event.data.args || {};
+    if (!ready) {
+      ready = true;
+      box.value = args.start_text || "";
+    }
+    // Ignore answers to text that has since changed (you kept typing).
+    if ((args.for_query || "") !== box.value.trim()) return;
+    suggestions = args.suggestions || [];
+    active = 0;
+    draw();
+  });
+
+  // ---- Typing --------------------------------------------------------
+  box.addEventListener("input", function () {
+    open = true;
+    clearTimeout(timer);
+    // Wait until you stop typing for a moment, so app.py isn't asked
+    // about every single letter of a fast typist.
+    timer = setTimeout(function () {
+      sendValue({query: box.value.trim(), pick: null});
+    }, 250);
+    if (!box.value.trim()) { suggestions = []; draw(); }
+  });
+
+  box.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowDown" && suggestions.length) {
+      e.preventDefault(); open = true; active = (active + 1) % suggestions.length; draw();
+    } else if (e.key === "ArrowUp" && suggestions.length) {
+      e.preventDefault(); active = (active - 1 + suggestions.length) % suggestions.length; draw();
+    } else if (e.key === "Enter" && suggestions.length) {
+      e.preventDefault(); pick(suggestions[active]);
+    } else if (e.key === "Escape") {
+      open = false; draw();
+    }
+  });
+
+  box.addEventListener("focus", function () { if (box.value.trim()) { open = true; draw(); } });
+  box.addEventListener("blur", function () {
+    // A short wait so a click on a song still counts before the list hides.
+    setTimeout(function () { open = false; draw(); }, 150);
+  });
+
+  function pick(song) {
+    clearTimeout(timer);
+    box.value = song.name + " - " + song.artist;
+    open = false;
+    draw();
+    box.blur();
+    sendValue({query: box.value, pick: song});
+  }
+
+  // ---- Drawing the list ------------------------------------------------
+  function draw() {
+    list.innerHTML = "";
+    const text = box.value.trim();
+    if (open && text) {
+      if (!suggestions.length) {
+        const li = document.createElement("li");
+        li.className = "empty";
+        li.textContent = "No songs found. Try part of the name or the artist.";
+        list.appendChild(li);
+      }
+      suggestions.forEach(function (song, i) {
+        const li = document.createElement("li");
+        if (i === active) li.className = "active";
+        const cover = document.createElement("div");
+        cover.className = "cover";
+        cover.innerHTML = "&#9835;";   // a music note until the picture arrives
+        const words = document.createElement("div");
+        words.className = "text";
+        // textContent (not innerHTML) so a song name can't break the page.
+        words.textContent = song.name + " ";
+        const who = document.createElement("span");
+        who.className = "artist";
+        who.textContent = "- " + song.artist;
+        words.appendChild(who);
+        li.appendChild(cover);
+        li.appendChild(words);
+        // mousedown happens before the box loses focus, so the click counts.
+        li.addEventListener("mousedown", function (e) { e.preventDefault(); pick(song); });
+        li.addEventListener("mouseenter", function () { active = i; markActive(); });
+        list.appendChild(li);
+        showCover(song, cover);
+      });
+    }
+    list.className = (open && text) ? "open" : "";
+    setHeight();
+  }
+
+  function markActive() {
+    Array.from(list.children).forEach(function (li, i) {
+      li.classList.toggle("active", i === active);
+    });
+  }
+
+  // ---- Album covers from Deezer -----------------------------------------
+  // Deezer's API answers in "JSONP" form: we add a script tag that calls
+  // one of our functions with the answer. That works from inside this
+  // frame without any key or server.
+  const covers = {};      // track_id -> picture url ("" = none found)
+  const waiting = {};     // track_id -> covers waiting for Deezer's answer
+  let callbackCount = 0;
+
+  function deezer(path, done) {
+    const name = "deezerAnswer" + (callbackCount++);
+    const script = document.createElement("script");
+    const finish = function (data) {
+      delete window[name];
+      script.remove();
+      done(data);
+    };
+    window[name] = finish;
+    script.onerror = function () { finish(null); };
+    script.src = "https://api.deezer.com/" + path +
+      (path.indexOf("?") === -1 ? "?" : "&") + "output=jsonp&callback=" + name;
+    document.body.appendChild(script);
+  }
+
+  function findCover(song, done) {
+    // Chart songs added from Deezer already have a Deezer id.
+    if (song.track_id.indexOf("deezer:") === 0) {
+      deezer("track/" + song.track_id.slice(7), function (d) {
+        done(d && d.album ? d.album.cover_small : "");
+      });
+      return;
+    }
+    // Catalog songs: search Deezer for the same title and artist.
+    const q = 'artist:"' + song.artist + '" track:"' + song.name + '"';
+    deezer("search?limit=1&q=" + encodeURIComponent(q), function (d) {
+      if (d && d.data && d.data.length) { done(d.data[0].album.cover_small); return; }
+      // No exact match: try a looser search with plain words.
+      deezer("search?limit=1&q=" + encodeURIComponent(song.name + " " + song.artist), function (d2) {
+        done(d2 && d2.data && d2.data.length ? d2.data[0].album.cover_small : "");
+      });
+    });
+  }
+
+  function showCover(song, el) {
+    const paint = function (box, url) {
+      if (!url) return;
+      const picture = document.createElement("img");
+      picture.src = url;
+      box.innerHTML = "";
+      box.appendChild(picture);
+    };
+    const id = song.track_id;
+    if (id in covers) { paint(el, covers[id]); return; }
+    // Already asking Deezer about this song: just wait for that answer.
+    if (id in waiting) { waiting[id].push(el); return; }
+    waiting[id] = [el];
+    findCover(song, function (url) {
+      covers[id] = url;
+      // The list may have been redrawn since; paint the boxes still showing.
+      waiting[id].forEach(function (box) { if (box.isConnected) paint(box, url); });
+      delete waiting[id];
+    });
+  }
+
+  // Tell Streamlit this page is ready to receive data.
+  send("streamlit:componentReady", {apiVersion: 1});
+  setHeight();
+</script>

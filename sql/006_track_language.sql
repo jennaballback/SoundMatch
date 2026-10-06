@@ -41,7 +41,7 @@ WITH genre_clues AS (
         bool_or(g.name = 'turkish')                                            AS turkish,
         bool_or(g.name = 'iranian')                                            AS persian,
         bool_or(g.name = 'malay')                                              AS malay,
-        bool_or(g.name IN ('indian', 'pop-film'))                              AS indian   -- pop-film = Indian film songs (some are Tamil, still labelled Hindi)
+        bool_or(g.name IN ('indian', 'pop-film'))                                             AS indian
     FROM track_genres tg
     JOIN genres g ON g.genre_id = tg.genre_id
     GROUP BY tg.track_id

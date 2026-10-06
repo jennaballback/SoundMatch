@@ -9,3 +9,4 @@ docker compose up -d >> logs\daily.log 2>&1
 ping -n 16 127.0.0.1 > nul
 set PYTHONIOENCODING=utf-8
 ".venv\Scripts\python.exe" pipelines\fetch_chart.py >> logs\daily.log 2>&1
+".venv\Scripts\python.exe" pipelines\analyze_chart_songs.py >> logs\daily.log 2>&1

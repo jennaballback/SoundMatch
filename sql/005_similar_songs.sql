@@ -1,4 +1,4 @@
--- =====================================================================
+﻿-- =====================================================================
 -- 005_similar_songs.sql : the similar-songs search
 --
 -- Saves the search as a function, so anything (psql, Python, the

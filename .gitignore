@@ -5,3 +5,4 @@ __pycache__/
 data/*.csv
 !data/sample_tracks.csv
 logs/
+models/
