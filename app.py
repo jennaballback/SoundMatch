@@ -17,8 +17,9 @@ Chart songs added by pipelines/analyze_chart_songs.py have ids like
 "deezer:12345" instead, so they get Deezer's player and a Spotify search link.
 
 Pages: Search, US top tracks (with up/down arrows against the previous
-saved chart) and Artists (an artist's songs, chart history and average
-sound profile). Click an artist's name in any list to open their page,
+saved chart), Artists (an artist's songs, chart history and average
+sound profile) and Genres (a genre's sound, its top songs and the genres
+that sound most like it). Click an artist's name in any list to open their page,
 and a song's title to open its song page (its sound, its chart history
 and the songs that sound most like it). The play button still opens Spotify.
 """
@@ -159,6 +160,84 @@ FROM audio_features
 """
 
 
+# Every genre with its number of songs, biggest first. One song can be in
+# several genres, so it's counted in each.
+GENRE_LIST_SQL = """
+SELECT g.name, count(DISTINCT lower(t.name)) AS songs
+FROM genres g
+JOIN track_genres tg ON tg.genre_id = g.genre_id
+JOIN tracks t ON t.track_id = tg.track_id
+GROUP BY g.name
+ORDER BY songs DESC, g.name
+"""
+
+# A genre's average sound, the same columns as ARTIST_PROFILE_SQL.
+GENRE_PROFILE_SQL = """
+SELECT avg(f.danceability), avg(f.energy), avg(f.valence), avg(f.acousticness),
+       avg(f.speechiness), avg(f.instrumentalness), avg(f.tempo), avg(f.loudness)
+FROM genres g
+JOIN track_genres tg ON tg.genre_id = g.genre_id
+JOIN audio_features f ON f.track_id = tg.track_id
+WHERE g.name = %(genre)s
+"""
+
+# The genres that sound most like this one. First every genre's average
+# sound (the "avgs" part), then the genre is joined to every other genre
+# (a self-join: the same table twice, as "me" and "other") and the
+# distance between their averages is measured the same way similar_songs
+# does for songs: tempo and loudness scaled to 0-1, then Euclidean distance.
+SIMILAR_GENRES_SQL = """
+WITH avgs AS (
+    SELECT g.name,
+           avg(f.danceability) AS dance, avg(f.energy) AS energy,
+           avg(f.valence) AS happy, avg(f.acousticness) AS acoustic,
+           avg(f.speechiness) AS speech, avg(f.instrumentalness) AS instr,
+           avg(f.tempo) / 250 AS tempo, (avg(f.loudness) + 60) / 60 AS loud
+    FROM genres g
+    JOIN track_genres tg ON tg.genre_id = g.genre_id
+    JOIN audio_features f ON f.track_id = tg.track_id
+    GROUP BY g.name
+)
+SELECT other.name,
+       sqrt(power(me.dance - other.dance, 2) + power(me.energy - other.energy, 2)
+          + power(me.happy - other.happy, 2) + power(me.acoustic - other.acoustic, 2)
+          + power(me.speech - other.speech, 2) + power(me.instr - other.instr, 2)
+          + power(me.tempo - other.tempo, 2) + power(me.loud - other.loud, 2)) AS distance
+FROM avgs me
+JOIN avgs other ON other.name <> me.name
+WHERE me.name = %(genre)s
+ORDER BY distance
+LIMIT 8
+"""
+
+# A genre's most popular songs, one copy of each, plus how many of its
+# songs have been on the US chart.
+GENRE_SONGS_SQL = """
+SELECT track_id, name, artist, language, popularity
+FROM (
+    SELECT DISTINCT ON (lower(t.name), lower(a.name))
+           t.track_id, t.name, a.name AS artist, t.language, t.popularity
+    FROM genres g
+    JOIN track_genres tg ON tg.genre_id = g.genre_id
+    JOIN tracks t ON t.track_id = tg.track_id
+    JOIN track_artists ta ON ta.track_id = t.track_id AND ta.position = 1
+    JOIN artists a ON a.artist_id = ta.artist_id
+    WHERE g.name = %(genre)s
+    ORDER BY lower(t.name), lower(a.name), t.popularity DESC NULLS LAST
+) AS songs
+ORDER BY popularity DESC NULLS LAST, name
+LIMIT 25
+"""
+
+GENRE_CHART_SQL = """
+SELECT count(DISTINCT lower(c.lastfm_track_name))
+FROM chart_entries c
+JOIN track_genres tg ON tg.track_id = c.track_id
+JOIN genres g ON g.genre_id = tg.genre_id
+WHERE g.name = %(genre)s
+"""
+
+
 # Everything about one song for its song page. The catalog lists some songs
 # several times (once per genre), so the genres are collected from every
 # copy with the same name and main artist.
@@ -282,6 +361,14 @@ def artist_link(name: str, link_name: str | None = None) -> str:
     return f'<a class="artist-link" href="{url}" target="_self">{html.escape(name)}</a>'
 
 
+def genre_link(name: str, extra: str = "") -> str:
+    # A genre as a rounded "chip" that opens its genre page. extra is
+    # small gray text after the name, like a song count or a match %.
+    url = "?page=Genres&genre=" + quote(name)
+    small = f' <span class="chip-extra">{extra}</span>' if extra else ""
+    return f'<a class="genre-chip" href="{url}" target="_self">{html.escape(name)}{small}</a>'
+
+
 def movement(rank: int, prev_rank: int | None) -> str:
     # A green arrow up or red arrow down with how many spots the song moved
     # since the previous chart, a gray dash if it stayed put, or NEW.
@@ -347,9 +434,13 @@ def artist_names() -> list[str]:
 
 
 @st.cache_data(ttl=3600)
+def genre_list() -> list[tuple]:
+    return run_query(GENRE_LIST_SQL)
+
+
+@st.cache_data(ttl=3600)
 def catalog_profile() -> tuple:
     return run_query(CATALOG_PROFILE_SQL)[0]
-
 
 def player(track_id: str) -> None:
     if track_id.startswith("deezer:"):
@@ -430,6 +521,9 @@ def song_page(track_id: str) -> None:
     st.markdown(f'<div class="by-line">by {artist_link(artist or "")}'
                 f'{f"  &#183;  from {html.escape(album)}" if album else ""}</div>',
                 unsafe_allow_html=True)
+    if genres:
+        st.markdown('<div class="chips">' + "".join(genre_link(g) for g in genres.split(", "))
+                    + "</div>", unsafe_allow_html=True)
     player(track_id)
 
     if features[0] is not None:
@@ -482,7 +576,7 @@ with st.sidebar:
     # format_func only changes what's shown: page is still "Search" or
     # "US top tracks". :material/...: puts a Google Material icon in the label.
     icons = {"Search": ":material/search:", "US top tracks": ":material/trending_up:",
-             "Artists": ":material/person:"}
+             "Artists": ":material/person:", "Genres": ":material/category:"}
     pages = list(icons)
     # An artist link opens the app with ?page=Artists&artist=... in the
     # address, so start on that page when it's there. A song link opens it
@@ -590,7 +684,7 @@ elif page == "US top tracks":
 # ---------------------------------------------------------------------
 # Page 3: one artist's songs, chart history and sound profile
 # ---------------------------------------------------------------------
-else:
+elif page == "Artists":
     names = artist_names()
     # Pre-pick the artist from the address when you came from an artist
     # link. Matching ignores upper/lower case.
@@ -629,4 +723,56 @@ else:
               f'<td class="right">{r[2] if r[2] is not None else ""}</td>',
               song_page_link(r[0])]
              for i, r in enumerate(songs, start=1)],
+        )
+
+# ---------------------------------------------------------------------
+# Page 4: genres. Every genre as a chip; pick one to see its sound,
+# the genres closest to it and its most popular songs.
+# ---------------------------------------------------------------------
+else:
+    genres = genre_list()
+    names = [g[0] for g in genres]
+    # Pre-pick the genre from the address when you came from a genre chip.
+    if "genre_pick" not in st.session_state:
+        wanted = st.query_params.get("genre")
+        st.session_state["genre_pick"] = wanted if wanted in names else None
+    genre = st.selectbox("Genre", names, index=None, key="genre_pick",
+                         placeholder="Type a genre")
+    if not genre:
+        banner("GENRES", "Explore genres",
+               f"{len(genres)} genres. Pick one to see how it sounds, its top songs "
+               "and the genres that sound most like it.")
+        st.markdown('<div class="chips">'
+                    + "".join(genre_link(name, f"{songs:,}") for name, songs in genres)
+                    + "</div>", unsafe_allow_html=True)
+    else:
+        st.query_params["page"] = "Genres"
+        st.query_params["genre"] = genre
+        songs_in_genre = dict(genres)[genre]
+        charted = run_query(GENRE_CHART_SQL, {"genre": genre})[0][0]
+        banner("GENRE", genre,
+               f"{songs_in_genre:,} songs in the catalog  -  {charted} on the US chart")
+
+        profile = run_query(GENRE_PROFILE_SQL, {"genre": genre})[0]
+        if profile[0] is not None:
+            sound_profile(profile, catalog_profile())
+
+        # Match % works like the songs' one: distance 0.05 shows as 95%.
+        close = run_query(SIMILAR_GENRES_SQL, {"genre": genre})
+        if close:
+            st.markdown('<div class="section-title">Sounds closest to</div>'
+                        '<div class="chips">'
+                        + "".join(genre_link(name, f"{max(0, round(100 * (1 - float(d))))}%")
+                                  for name, d in close)
+                        + "</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="section-title">Top songs</div>', unsafe_allow_html=True)
+        top = run_query(GENRE_SONGS_SQL, {"genre": genre})
+        tracklist(
+            ["#", "Title", "Language", "Popularity"],
+            [[str(i), r[1], artist_link(r[2]), spotify_link(r[0], r[1], r[2]),
+              f'<td class="lang">{html.escape(r[3] or "")}</td>'
+              f'<td class="right">{r[4] if r[4] is not None else ""}</td>',
+              song_page_link(r[0])]
+             for i, r in enumerate(top, start=1)],
         )
