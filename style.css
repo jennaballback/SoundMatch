@@ -93,3 +93,17 @@ html, body, h1, h2, h3, p, label, input, .banner, .tracklist {
 .bar .tick { position: absolute; top: -4px; width: 2px; height: 16px; background-color: #ffffff; }
 .bar-value { width: 2.5rem; text-align: right; color: #ffffff; font-weight: 600; font-size: 0.9rem; }
 .profile-note { color: #b3b3b3; font-size: 0.8rem; margin-top: 0.8rem; }
+/* Song page */
+.by-line { color: #b3b3b3; font-size: 1rem; margin: -0.5rem 0 1rem 0; }
+.by-line .artist-link { color: #ffffff; font-weight: 700; text-decoration: none; }
+.by-line .artist-link:hover { text-decoration: underline; }
+.page-link { display: inline-block; color: #1ed760 !important; font-weight: 700; text-decoration: none; margin: 0.2rem 0 1rem 0; }
+.page-link:hover { text-decoration: underline; }
+.section-title { font-size: 1.2rem; font-weight: 700; color: #ffffff; margin: 1rem 0 0.2rem 0; }
+.section-sub { color: #b3b3b3; font-size: 0.9rem; margin-bottom: 0.5rem; }
+/* Song page: the album cover inside the banner, left of the title */
+.banner.with-cover { display: flex; align-items: flex-end; gap: 1.5rem; }
+.banner .cover {
+    width: 170px; height: 170px; flex: none; object-fit: cover;
+    border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}

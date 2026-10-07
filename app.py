@@ -11,15 +11,19 @@ The dark theme colors live in .streamlit/config.toml. The rest of the look
 (font, the gradient header, the track lists) is in style.css.
 
 Playing songs: the song you search gets a Spotify player under the header,
-and every song title in a list opens that song on Spotify in a new tab.
+and the play button on every song in a list opens it on Spotify in a new tab.
 The catalog came from Spotify, so its track_id is the real Spotify id.
 Chart songs added by pipelines/analyze_chart_songs.py have ids like
 "deezer:12345" instead, so they get Deezer's player and a Spotify search link.
 
 Pages: Search, US top tracks (with up/down arrows against the previous
 saved chart) and Artists (an artist's songs, chart history and average
-sound profile). Click an artist's name in any list to open their page.
+sound profile). Click an artist's name in any list to open their page,
+and a song's title to open its song page (its sound, its chart history
+and the songs that sound most like it). The play button still opens Spotify.
 """
+
+import altair as alt
 
 import html
 import os
@@ -27,6 +31,7 @@ from urllib.parse import quote
 from pathlib import Path
 
 import psycopg
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
@@ -154,6 +159,42 @@ FROM audio_features
 """
 
 
+# Everything about one song for its song page. The catalog lists some songs
+# several times (once per genre), so the genres are collected from every
+# copy with the same name and main artist.
+SONG_SQL = """
+SELECT t.track_id, t.name, a.name AS artist, t.language, t.popularity, t.album_name,
+       f.danceability, f.energy, f.valence, f.acousticness,
+       f.speechiness, f.instrumentalness, f.tempo, f.loudness,
+       (SELECT string_agg(DISTINCT g.name, ', ')
+        FROM tracks t2
+        JOIN track_artists ta2 ON ta2.track_id = t2.track_id AND ta2.position = 1
+        JOIN track_genres tg ON tg.track_id = t2.track_id
+        JOIN genres g ON g.genre_id = tg.genre_id
+        WHERE lower(t2.name) = lower(t.name) AND ta2.artist_id = ta.artist_id) AS genres
+FROM tracks t
+LEFT JOIN track_artists ta ON ta.track_id = t.track_id AND ta.position = 1
+LEFT JOIN artists a ON a.artist_id = ta.artist_id
+LEFT JOIN audio_features f ON f.track_id = t.track_id
+WHERE t.track_id = %s
+"""
+
+# The song's rank on every day it was on the chart. Any copy of the song
+# (same name, same main artist) counts, since the chart may have been
+# matched to a different copy.
+SONG_CHART_SQL = """
+SELECT c.chart_date, min(c.rank) AS rank
+FROM chart_entries c
+JOIN tracks t ON t.track_id = c.track_id
+JOIN track_artists ta ON ta.track_id = t.track_id AND ta.position = 1
+WHERE lower(t.name) = lower(%(name)s)
+  AND ta.artist_id = (SELECT artist_id FROM track_artists
+                      WHERE track_id = %(track_id)s AND position = 1)
+GROUP BY c.chart_date
+ORDER BY c.chart_date
+"""
+
+
 def run_query(sql: str, params: tuple | dict = ()) -> list[tuple]:
     with psycopg.connect(DSN) as conn, conn.cursor() as cur:
         cur.execute(sql, params)
@@ -190,15 +231,48 @@ def spotify_link(track_id: str | None, name: str, artist: str) -> str:
     return "https://open.spotify.com/search/" + quote(f"{name} {artist}")
 
 
-def banner(kicker: str, title: str, sub: str) -> None:
+def banner(kicker: str, title: str, sub: str, cover: str | None = None) -> None:
     # html.escape turns characters like < and & into safe text, so a song
-    # name can never break the page.
+    # name can never break the page. cover is a picture address; when it's
+    # given, the picture sits to the left of the title (style.css).
+    tag = "img"
+    picture = f'<{tag} class="cover" src="{html.escape(cover)}" alt="">' if cover else ""
     st.markdown(
-        f'<div class="banner"><div class="kicker">{html.escape(kicker)}</div>'
+        f'<div class="banner{" with-cover" if cover else ""}">{picture}<div>'
+        f'<div class="kicker">{html.escape(kicker)}</div>'
         f'<div class="title">{html.escape(title)}</div>'
-        f'<div class="sub">{html.escape(sub)}</div></div>',
+        f'<div class="sub">{html.escape(sub)}</div></div></div>',
         unsafe_allow_html=True,
     )
+
+
+@st.cache_data(ttl=24 * 3600)
+def album_cover(track_id: str | None, name: str, artist: str) -> str | None:
+    # The album cover comes from Deezer's free API (no key), like the
+    # covers in the search box. Songs added from Deezer are looked up by
+    # their Deezer id; other songs by title and artist. Remembered for a day.
+    # Returns None if Deezer is unreachable or has no match.
+    try:
+        if track_id and track_id.startswith("deezer:"):
+            found = requests.get("https://api.deezer.com/track/" + track_id.removeprefix("deezer:"),
+                                 timeout=5).json()
+            return found.get("album", {}).get("cover_big")
+        for query in (f'artist:"{artist}" track:"{name}"', f"{name} {artist}"):
+            results = requests.get("https://api.deezer.com/search",
+                                   params={"q": query, "limit": 1}, timeout=5).json().get("data")
+            if results:
+                return results[0]["album"]["cover_big"]
+    except (requests.RequestException, ValueError, KeyError):
+        pass
+    return None
+
+
+def song_page_link(track_id: str | None, name: str = "", artist: str = "") -> str:
+    # The address of a song's own page. Chart songs that aren't in the
+    # catalog have no track_id, so their page is found by name and artist.
+    if track_id:
+        return "?song=" + quote(track_id)
+    return "?chart_song=" + quote(name) + "&artist=" + quote(artist)
 
 
 def artist_link(name: str, link_name: str | None = None) -> str:
@@ -221,10 +295,12 @@ def movement(rank: int, prev_rank: int | None) -> str:
 
 
 def tracklist(headers: list[str], rows: list[list[str]], moves: list[str] | None = None) -> None:
-    # Each row is [number, song, artist html, Spotify link, right-hand cells html].
+    # Each row is [number, song, artist html, Spotify link, right-hand cells html,
+    # song page link]. The title opens the song page in the same tab
+    # (target="_self"). Only the play button opens Spotify.
     # moves, when given, is an extra cell per row after the number (the chart arrows).
     # The number turns into a play button when you point at the row
-    # (style.css does that), and the button and the title both open Spotify.
+    # (style.css does that), and the button opens Spotify.
     # target="_blank" opens the link in a new tab, so the app stays open.
     # The artist html is usually artist_link(...), so it opens the artist page.
     head = "".join(f"<th>{h}</th>" for h in headers)
@@ -233,18 +309,19 @@ def tracklist(headers: list[str], rows: list[list[str]], moves: list[str] | None
         f'<tr><td class="num"><span class="idx">{num}</span>'
         f'<a class="play" href="{html.escape(url)}" target="_blank">&#9654;</a></td>'
         f'{"" if move is None else f"<td class=move-cell>{move}</td>"}'
-        f'<td><a class="song" href="{html.escape(url)}" target="_blank">{html.escape(song)}</a>'
+        f'<td><a class="song" href="{html.escape(page)}" target="_self">{html.escape(song)}</a>'
         f'<div class="artist">{artist}</div></td>'
         f"{right}</tr>"
-        for (num, song, artist, url, right), move in zip(rows, moves)
+        for (num, song, artist, url, right, page), move in zip(rows, moves)
     )
     st.markdown(f'<table class="tracklist"><tr>{head}</tr>{body}</table>',
                 unsafe_allow_html=True)
 
 
-def sound_profile(artist_avg: tuple, catalog_avg: tuple) -> None:
-    # One bar per feature: green is the artist's average, the white tick is
-    # the average song in the catalog, so you can see what makes them stand out.
+def sound_profile(artist_avg: tuple, catalog_avg: tuple, note: str = "") -> None:
+    # One bar per feature: green is the artist's average (or one song's
+    # value, on the song page), the white tick is the average song in the
+    # catalog, so you can see what makes them stand out.
     labels = ["Danceability", "Energy", "Happiness", "Acousticness",
               "Speechiness", "Instrumentalness"]
     bars = "".join(
@@ -258,7 +335,7 @@ def sound_profile(artist_avg: tuple, catalog_avg: tuple) -> None:
         f'<div class="profile"><div class="profile-title">Sound profile</div>{bars}'
         f'<div class="profile-note">Average tempo {float(artist_avg[6]):.0f} BPM, '
         f'loudness {float(artist_avg[7]):.1f} dB. '
-        f'White tick = the average song in the catalog.</div></div>',
+        f'White tick = the average song in the catalog.{note}</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -274,29 +351,125 @@ def catalog_profile() -> tuple:
     return run_query(CATALOG_PROFILE_SQL)[0]
 
 
-def show_similar(track_id: str, name: str, artist: str, language: str,
-                 how_many: int, same_language: bool) -> None:
-    rows = run_query(SIMILAR_SQL, (track_id, how_many, same_language))
+def player(track_id: str) -> None:
     if track_id.startswith("deezer:"):
-        banner("SOUNDS LIKE", name,
-               f"{artist}  -  {language}  -  {len(rows)} songs  -  mood scores estimated")
         # Deezer's player, with the same 30 second preview the scores came from.
         deezer_id = track_id.removeprefix("deezer:")
         components.iframe(f"https://widget.deezer.com/widget/dark/track/{deezer_id}", height=152)
     else:
-        banner("SOUNDS LIKE", name, f"{artist}  -  {language}  -  {len(rows)} songs")
         # Spotify's own player. It plays a 30 second preview, or the whole song
         # if you're logged in to Spotify in this browser.
         components.iframe(f"https://open.spotify.com/embed/track/{track_id}?theme=0", height=152)
+
+
+def similar_list(rows: list[tuple]) -> None:
     # A distance of 0 is identical. Turn it into a friendlier "% match"
     # (distance 0.05 shows as 95%).
     tracklist(
         ["#", "Title", "Language", "Match"],
         [[str(i), r[0], artist_link(r[1]), spotify_link(r[4], r[0], r[1]),
           f'<td class="lang">{html.escape(r[2] or "")}</td>'
-          f'<td class="match">{max(0, round(100 * (1 - float(r[3]))))}%</td>']
+          f'<td class="match">{max(0, round(100 * (1 - float(r[3]))))}%</td>',
+          song_page_link(r[4])]
          for i, r in enumerate(rows, start=1)],
     )
+
+
+def show_similar(track_id: str, name: str, artist: str, language: str,
+                 how_many: int, same_language: bool) -> None:
+    rows = run_query(SIMILAR_SQL, (track_id, how_many, same_language))
+    if track_id.startswith("deezer:"):
+        banner("SOUNDS LIKE", name,
+               f"{artist}  -  {language}  -  {len(rows)} songs  -  mood scores estimated")
+    else:
+        banner("SOUNDS LIKE", name, f"{artist}  -  {language}  -  {len(rows)} songs")
+    player(track_id)
+    st.markdown(f'<a class="page-link" href="{song_page_link(track_id)}" target="_self">'
+                f'Open the song page for {html.escape(name)} &#8594;</a>',
+                unsafe_allow_html=True)
+    similar_list(rows)
+
+
+def chart_history(days: list[tuple]) -> None:
+    # The song's rank on each chart day as a line. Rank 1 is the top, so the
+    # y axis is flipped (reverse=True) to put #1 at the top like a real chart.
+    best = min(r[1] for r in days)
+    st.markdown(
+        f'<div class="section-title">On the US chart</div>'
+        f'<div class="section-sub">{len(days)} day{"" if len(days) == 1 else "s"}, '
+        f'best rank #{best}, last seen {days[-1][0]:%B %d}</div>',
+        unsafe_allow_html=True,
+    )
+    # Each day is a label like "Oct 05", kept in date order (sort=None), so
+    # the axis shows exactly the days that were saved.
+    data = [{"Day": f"{d:%b %d}", "Rank": r} for d, r in days]
+    line = alt.Chart(alt.Data(values=data)).mark_line(
+        color="#1ed760", point=alt.OverlayMarkDef(color="#1ed760", size=60)
+    ).encode(
+        x=alt.X("Day:O", title=None, sort=None, axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("Rank:Q", title="Rank", axis=alt.Axis(tickMinStep=1, format="d"),
+                scale=alt.Scale(reverse=True, domain=[1, max(r[1] for r in days) + 2])),
+        tooltip=["Day:O", "Rank:Q"],
+    ).properties(height=220)
+    st.altair_chart(line, use_container_width=True)
+
+
+def song_page(track_id: str) -> None:
+    found = run_query(SONG_SQL, (track_id,))
+    if not found:
+        st.warning("That song isn't in the catalog.")
+        return
+    (track_id, name, artist, language, popularity, album,
+     *features, genres) = found[0]
+    estimated = track_id.startswith("deezer:")
+    facts = [artist or "", language or "", genres or "",
+             f"popularity {popularity}" if popularity is not None else "",
+             "mood scores estimated" if estimated else ""]
+    banner("SONG", name, "  -  ".join(f for f in facts if f),
+           cover=album_cover(track_id, name, artist or ""))
+    st.markdown(f'<div class="by-line">by {artist_link(artist or "")}'
+                f'{f"  &#183;  from {html.escape(album)}" if album else ""}</div>',
+                unsafe_allow_html=True)
+    player(track_id)
+
+    if features[0] is not None:
+        sound_profile(features, catalog_profile())
+
+    days = run_query(SONG_CHART_SQL, {"name": name, "track_id": track_id})
+    if days:
+        chart_history(days)
+
+    st.markdown('<div class="section-title">Sounds like</div>', unsafe_allow_html=True)
+    similar_list(run_query(SIMILAR_SQL, (track_id, 10, False)))
+
+
+# A chart song that isn't in the catalog: its rank on every chart day,
+# found by its Last.fm name and artist.
+CHART_SONG_SQL = """
+SELECT chart_date, min(rank) AS rank
+FROM chart_entries
+WHERE lower(lastfm_track_name) = lower(%(name)s)
+  AND lower(lastfm_artist_name) = lower(%(artist)s)
+GROUP BY chart_date
+ORDER BY chart_date
+"""
+
+
+def chart_song_page(name: str, artist: str) -> None:
+    # A smaller song page for chart songs that aren't in the catalog yet.
+    # Without audio features there's no sound profile or similar songs,
+    # but the chart history still works.
+    banner("SONG", name, f"{artist}  -  not in the catalog yet",
+           cover=album_cover(None, name, artist))
+    st.markdown(f'<div class="by-line">by {artist_link(artist)}  &#183;  '
+                f'<a class="artist-link" href="{html.escape(spotify_link(None, name, artist))}" '
+                f'target="_blank">find it on Spotify</a></div>',
+                unsafe_allow_html=True)
+    days = run_query(CHART_SONG_SQL, {"name": name, "artist": artist})
+    if days:
+        chart_history(days)
+    st.caption("This song came out after the catalog ends (around 2022), so there are no "
+               "sound scores for it yet. pipelines/analyze_chart_songs.py can add them.")
 
 
 st.set_page_config(page_title="SoundMatch", page_icon=":headphones:", layout="wide")
@@ -312,21 +485,33 @@ with st.sidebar:
              "Artists": ":material/person:"}
     pages = list(icons)
     # An artist link opens the app with ?page=Artists&artist=... in the
-    # address, so start on that page when it's there. Setting the menu's
+    # address, so start on that page when it's there. A song link opens it
+    # with ?song=..., and then no menu item is picked. Setting the menu's
     # value in session_state (under its key) only happens on the first run.
     if "page" not in st.session_state:
         start = st.query_params.get("page")
-        st.session_state["page"] = start if start in pages else pages[0]
-    page = st.radio("Go to", pages, key="page", label_visibility="collapsed",
-                    format_func=lambda p: f"{icons[p]}  {p}")
-# Leaving the Artists page clears the address, so a reload doesn't jump back.
-if page != "Artists" and st.query_params.get("page"):
-    st.query_params.clear()
+        if st.query_params.get("song") or st.query_params.get("chart_song"):
+            st.session_state["page"] = None
+        else:
+            st.session_state["page"] = start if start in pages else pages[0]
+    # Clicking a menu item clears the address first (on_change runs before
+    # the page is drawn), so you leave a song or artist page.
+    page = st.radio("Go to", pages, key="page", index=None, label_visibility="collapsed",
+                    format_func=lambda p: f"{icons[p]}  {p}",
+                    on_change=st.query_params.clear)
+
+# ---------------------------------------------------------------------
+# A song's own page (opened from a song title link)
+# ---------------------------------------------------------------------
+if st.query_params.get("song"):
+    song_page(st.query_params["song"])
+elif st.query_params.get("chart_song"):
+    chart_song_page(st.query_params["chart_song"], st.query_params.get("artist") or "")
 
 # ---------------------------------------------------------------------
 # Page 1: type a song, get similar songs
 # ---------------------------------------------------------------------
-if page == "Search":
+elif page == "Search" or page is None:
     banner("SEARCH", "Find similar songs",
            "Type a song and get back songs that sound like it. The catalog stops around 2022.")
 
@@ -396,7 +581,8 @@ elif page == "US top tracks":
               spotify_link(r[4], r[1], r[2]),
               f'<td class="lang">{html.escape(r[5] or "")}</td>'
               f'<td class="right">{"<span class=dot>&#9679;</span> " if r[4] else ""}'
-              f'{(r[3] or 0):,}</td>']
+              f'{(r[3] or 0):,}</td>',
+              song_page_link(r[4], r[1], r[2])]
              for r in chart],
             moves=[movement(r[0], r[6]) for r in chart] if prev_day else None,
         )
@@ -440,6 +626,7 @@ else:
               spotify_link(r[0], r[1], artist),
               f'<td class="lang">'
               f'{f"{r[4]} days, best #{r[5]}, last {r[6]:%b %d}" if r[4] else ""}</td>'
-              f'<td class="right">{r[2] if r[2] is not None else ""}</td>']
+              f'<td class="right">{r[2] if r[2] is not None else ""}</td>',
+              song_page_link(r[0])]
              for i, r in enumerate(songs, start=1)],
         )
