@@ -374,7 +374,7 @@ def back_button() -> None:
     # browser's own back arrow (history.back), so it returns to whatever you
     # came from. If there's nowhere to go back to (the page was opened in a
     # new tab), it goes to the home page instead.
-    # It's a tiny web page of its own (components.html), so it can run that
+    # It's a tiny web page of its own (st.iframe), so it can run that
     # one line of JavaScript; window.parent is the SoundMatch page around it.
     # history.length is how many pages this browser tab has visited.
     go_back = ("var p = window.parent; "
@@ -382,7 +382,7 @@ def back_button() -> None:
                "else p.location.href = p.location.pathname;")
     look = ("background:#2a2a2a; color:#ffffff; border:none; border-radius:500px; "
             "padding:6px 16px; font:600 14px Helvetica, Arial, sans-serif; cursor:pointer;")
-    components.html(
+    st.iframe(
         f'<button onclick="{go_back}" style="{look}" '
         f'onmouseover="this.style.background=\'#3e3e3e\'" '
         f'onmouseout="this.style.background=\'#2a2a2a\'">&#8592; Back</button>',
@@ -467,11 +467,11 @@ def player(track_id: str) -> None:
     if track_id.startswith("deezer:"):
         # Deezer's player, with the same 30 second preview the scores came from.
         deezer_id = track_id.removeprefix("deezer:")
-        components.iframe(f"https://widget.deezer.com/widget/dark/track/{deezer_id}", height=152)
+        st.iframe(f"https://widget.deezer.com/widget/dark/track/{deezer_id}", height=152)
     else:
         # Spotify's own player. It plays a 30 second preview, or the whole song
         # if you're logged in to Spotify in this browser.
-        components.iframe(f"https://open.spotify.com/embed/track/{track_id}?theme=0", height=152)
+        st.iframe(f"https://open.spotify.com/embed/track/{track_id}?theme=0", height=152)
 
 
 def similar_list(rows: list[tuple]) -> None:
@@ -523,7 +523,7 @@ def chart_history(days: list[tuple]) -> None:
                 scale=alt.Scale(reverse=True, domain=[1, max(r[1] for r in days) + 2])),
         tooltip=["Day:O", "Rank:Q"],
     ).properties(height=220)
-    st.altair_chart(line, use_container_width=True)
+    st.altair_chart(line, width="stretch")
 
 
 def song_page(track_id: str) -> None:
