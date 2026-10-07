@@ -310,17 +310,20 @@ def spotify_link(track_id: str | None, name: str, artist: str) -> str:
     return "https://open.spotify.com/search/" + quote(f"{name} {artist}")
 
 
-def banner(kicker: str, title: str, sub: str, cover: str | None = None) -> None:
+def banner(kicker: str, title: str, sub: str, cover: str | None = None,
+           sub_is_html: bool = False) -> None:
     # html.escape turns characters like < and & into safe text, so a song
     # name can never break the page. cover is a picture address; when it's
     # given, the picture sits to the left of the title (style.css).
+    # sub_is_html=True means sub already has links in it (and was escaped
+    # piece by piece), so it's used as it is.
     tag = "img"
     picture = f'<{tag} class="cover" src="{html.escape(cover)}" alt="">' if cover else ""
     st.markdown(
         f'<div class="banner{" with-cover" if cover else ""}">{picture}<div>'
         f'<div class="kicker">{html.escape(kicker)}</div>'
         f'<div class="title">{html.escape(title)}</div>'
-        f'<div class="sub">{html.escape(sub)}</div></div></div>',
+        f'<div class="sub">{sub if sub_is_html else html.escape(sub)}</div></div></div>',
         unsafe_allow_html=True,
     )
 
@@ -361,6 +364,12 @@ def artist_link(name: str, link_name: str | None = None) -> str:
     return f'<a class="artist-link" href="{url}" target="_self">{html.escape(name)}</a>'
 
 
+def sub_link(text: str, url: str, new_tab: bool = False) -> str:
+    # A plain link for the line under a page's title (style .banner .sub a).
+    return (f'<a href="{html.escape(url)}" target="{"_blank" if new_tab else "_self"}">'
+            f'{html.escape(text)}</a>')
+
+
 def genre_link(name: str, extra: str = "") -> str:
     # A genre as a rounded "chip" that opens its genre page. extra is
     # small gray text after the name, like a song count or a match %.
@@ -383,7 +392,7 @@ def back_button() -> None:
     look = ("background:#2a2a2a; color:#ffffff; border:none; border-radius:500px; "
             "padding:6px 16px; font:600 14px Helvetica, Arial, sans-serif; cursor:pointer;")
     st.iframe(
-        f'<button onclick="{go_back}" style="{look}" '
+        f'<body style="margin:0; overflow:hidden"><button onclick="{go_back}" style="{look}" '
         f'onmouseover="this.style.background=\'#3e3e3e\'" '
         f'onmouseout="this.style.background=\'#2a2a2a\'">&#8592; Back</button>',
         height=40,
@@ -535,17 +544,17 @@ def song_page(track_id: str) -> None:
     (track_id, name, artist, language, popularity, album,
      *features, genres) = found[0]
     estimated = track_id.startswith("deezer:")
-    facts = [artist or "", language or "", genres or "",
+    # The line under the title: the artist and each genre are links to
+    # their pages, the rest is plain text.
+    facts = [sub_link(artist, "?page=Artists&artist=" + quote(artist)) if artist else "",
+             html.escape(language or ""),
+             ", ".join(sub_link(g, "?page=Genres&genre=" + quote(g))
+                       for g in (genres or "").split(", ") if g),
+             f"from {html.escape(album)}" if album else "",
              f"popularity {popularity}" if popularity is not None else "",
              "mood scores estimated" if estimated else ""]
     banner("SONG", name, "  -  ".join(f for f in facts if f),
-           cover=album_cover(track_id, name, artist or ""))
-    st.markdown(f'<div class="by-line">by {artist_link(artist or "")}'
-                f'{f"  &#183;  from {html.escape(album)}" if album else ""}</div>',
-                unsafe_allow_html=True)
-    if genres:
-        st.markdown('<div class="chips">' + "".join(genre_link(g) for g in genres.split(", "))
-                    + "</div>", unsafe_allow_html=True)
+           cover=album_cover(track_id, name, artist or ""), sub_is_html=True)
     player(track_id)
 
     if features[0] is not None:
@@ -576,12 +585,11 @@ def chart_song_page(name: str, artist: str) -> None:
     # Without audio features there's no sound profile or similar songs,
     # but the chart history still works.
     back_button()
-    banner("SONG", name, f"{artist}  -  not in the catalog yet",
-           cover=album_cover(None, name, artist))
-    st.markdown(f'<div class="by-line">by {artist_link(artist)}  &#183;  '
-                f'<a class="artist-link" href="{html.escape(spotify_link(None, name, artist))}" '
-                f'target="_blank">find it on Spotify</a></div>',
-                unsafe_allow_html=True)
+    banner("SONG", name,
+           sub_link(artist, "?page=Artists&artist=" + quote(artist))
+           + "  -  not in the catalog yet  -  "
+           + sub_link("find it on Spotify", spotify_link(None, name, artist), new_tab=True),
+           cover=album_cover(None, name, artist), sub_is_html=True)
     days = run_query(CHART_SONG_SQL, {"name": name, "artist": artist})
     if days:
         chart_history(days)

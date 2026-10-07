@@ -116,3 +116,7 @@ html, body, h1, h2, h3, p, label, input, .banner, .tracklist {
 .genre-chip:hover { background-color: #1ed760; color: #000000 !important; }
 .genre-chip:hover .chip-extra { color: #000000; }
 .chip-extra { color: #b3b3b3; font-weight: 400; margin-left: 0.2rem; }
+
+/* Links in the line under a page title (artist and genres on song pages) */
+.banner .sub a { color: #ffffff !important; font-weight: 600; text-decoration: none; }
+.banner .sub a:hover { text-decoration: underline; }
