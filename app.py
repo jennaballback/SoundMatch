@@ -369,6 +369,27 @@ def genre_link(name: str, extra: str = "") -> str:
     return f'<a class="genre-chip" href="{url}" target="_self">{html.escape(name)}{small}</a>'
 
 
+def back_button() -> None:
+    # A "Back" button for song, artist and genre pages. It works like the
+    # browser's own back arrow (history.back), so it returns to whatever you
+    # came from. If there's nowhere to go back to (the page was opened in a
+    # new tab), it goes to the home page instead.
+    # It's a tiny web page of its own (components.html), so it can run that
+    # one line of JavaScript; window.parent is the SoundMatch page around it.
+    # history.length is how many pages this browser tab has visited.
+    go_back = ("var p = window.parent; "
+               "if (p.history.length > 1) p.history.back(); "
+               "else p.location.href = p.location.pathname;")
+    look = ("background:#2a2a2a; color:#ffffff; border:none; border-radius:500px; "
+            "padding:6px 16px; font:600 14px Helvetica, Arial, sans-serif; cursor:pointer;")
+    components.html(
+        f'<button onclick="{go_back}" style="{look}" '
+        f'onmouseover="this.style.background=\'#3e3e3e\'" '
+        f'onmouseout="this.style.background=\'#2a2a2a\'">&#8592; Back</button>',
+        height=40,
+    )
+
+
 def movement(rank: int, prev_rank: int | None) -> str:
     # A green arrow up or red arrow down with how many spots the song moved
     # since the previous chart, a gray dash if it stayed put, or NEW.
@@ -506,6 +527,7 @@ def chart_history(days: list[tuple]) -> None:
 
 
 def song_page(track_id: str) -> None:
+    back_button()
     found = run_query(SONG_SQL, (track_id,))
     if not found:
         st.warning("That song isn't in the catalog.")
@@ -553,6 +575,7 @@ def chart_song_page(name: str, artist: str) -> None:
     # A smaller song page for chart songs that aren't in the catalog yet.
     # Without audio features there's no sound profile or similar songs,
     # but the chart history still works.
+    back_button()
     banner("SONG", name, f"{artist}  -  not in the catalog yet",
            cover=album_cover(None, name, artist))
     st.markdown(f'<div class="by-line">by {artist_link(artist)}  &#183;  '
@@ -588,11 +611,16 @@ with st.sidebar:
             st.session_state["page"] = None
         else:
             st.session_state["page"] = start if start in pages else pages[0]
-    # Clicking a menu item clears the address first (on_change runs before
-    # the page is drawn), so you leave a song or artist page.
+    # Clicking a menu item (on_change runs before the page is drawn) puts
+    # just that page in the address, so you leave a song or artist page,
+    # and the Back button can bring you back to this page later.
+    def open_menu_page() -> None:
+        st.query_params.clear()
+        st.query_params["page"] = st.session_state["page"]
+
     page = st.radio("Go to", pages, key="page", index=None, label_visibility="collapsed",
                     format_func=lambda p: f"{icons[p]}  {p}",
-                    on_change=st.query_params.clear)
+                    on_change=open_menu_page)
 
 # ---------------------------------------------------------------------
 # A song's own page (opened from a song title link)
@@ -686,6 +714,8 @@ elif page == "US top tracks":
 # ---------------------------------------------------------------------
 elif page == "Artists":
     names = artist_names()
+    if st.query_params.get("artist"):
+        back_button()
     # Pre-pick the artist from the address when you came from an artist
     # link. Matching ignores upper/lower case.
     if "artist_pick" not in st.session_state:
@@ -698,9 +728,11 @@ elif page == "Artists":
         banner("ARTISTS", "Artist pages",
                "Pick an artist to see their songs, their chart history and how they sound.")
     else:
-        # Keep the address in step with the picked artist.
-        st.query_params["page"] = "Artists"
-        st.query_params["artist"] = artist
+        # Keep the address in step with the picked artist. Only when it
+        # changed, since each change adds a step to the browser's history.
+        if st.query_params.get("artist") != artist:
+            st.query_params["page"] = "Artists"
+            st.query_params["artist"] = artist
         songs = run_query(ARTIST_SONGS_SQL, {"artist": artist})
         profile = run_query(ARTIST_PROFILE_SQL, {"artist": artist})[0]
         charted = [r for r in songs if r[4]]
@@ -732,6 +764,8 @@ elif page == "Artists":
 else:
     genres = genre_list()
     names = [g[0] for g in genres]
+    if st.query_params.get("genre"):
+        back_button()
     # Pre-pick the genre from the address when you came from a genre chip.
     if "genre_pick" not in st.session_state:
         wanted = st.query_params.get("genre")
@@ -746,8 +780,9 @@ else:
                     + "".join(genre_link(name, f"{songs:,}") for name, songs in genres)
                     + "</div>", unsafe_allow_html=True)
     else:
-        st.query_params["page"] = "Genres"
-        st.query_params["genre"] = genre
+        if st.query_params.get("genre") != genre:
+            st.query_params["page"] = "Genres"
+            st.query_params["genre"] = genre
         songs_in_genre = dict(genres)[genre]
         charted = run_query(GENRE_CHART_SQL, {"genre": genre})[0][0]
         banner("GENRE", genre,
