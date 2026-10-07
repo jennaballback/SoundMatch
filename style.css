@@ -70,3 +70,26 @@ html, body, h1, h2, h3, p, label, input, .banner, .tracklist {
 [data-testid="stSidebar"] [role="radiogroup"] label:hover p { color: #ffffff; }
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) { background-color: #242424; }
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p { color: #ffffff; }
+
+/* Chart arrows: green up, red down, gray dash for no change, NEW for new songs */
+.tracklist .move-cell { width: 3.2rem; white-space: nowrap; font-size: 0.8rem; font-weight: 700; }
+.move.up   { color: #1ed760; }
+.move.down { color: #f15e6c; }
+.move.same { color: #727272; }
+.move.new  { color: #1ed760; font-size: 0.65rem; letter-spacing: 0.05em;
+             border: 1px solid #1ed760; border-radius: 4px; padding: 0 0.25rem; }
+
+/* Artist names in lists open the artist page */
+.tracklist .artist-link { color: #b3b3b3; text-decoration: none; }
+.tracklist .artist-link:hover { color: #ffffff; text-decoration: underline; }
+
+/* Artist page: the sound profile bars */
+.profile { background-color: #181818; border-radius: 8px; padding: 1.2rem 1.5rem; margin-bottom: 1.5rem; }
+.profile-title { font-size: 1.2rem; font-weight: 700; color: #ffffff; margin-bottom: 0.8rem; }
+.bar-row { display: flex; align-items: center; gap: 1rem; margin: 0.45rem 0; }
+.bar-label { width: 9rem; color: #b3b3b3; font-size: 0.9rem; }
+.bar { position: relative; flex: 1; height: 8px; background-color: #3e3e3e; border-radius: 4px; }
+.bar .fill { height: 100%; background-color: #1ed760; border-radius: 4px; }
+.bar .tick { position: absolute; top: -4px; width: 2px; height: 16px; background-color: #ffffff; }
+.bar-value { width: 2.5rem; text-align: right; color: #ffffff; font-weight: 600; font-size: 0.9rem; }
+.profile-note { color: #b3b3b3; font-size: 0.8rem; margin-top: 0.8rem; }

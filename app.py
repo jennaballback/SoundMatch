@@ -15,6 +15,10 @@ and every song title in a list opens that song on Spotify in a new tab.
 The catalog came from Spotify, so its track_id is the real Spotify id.
 Chart songs added by pipelines/analyze_chart_songs.py have ids like
 "deezer:12345" instead, so they get Deezer's player and a Spotify search link.
+
+Pages: Search, US top tracks (with up/down arrows against the previous
+saved chart) and Artists (an artist's songs, chart history and average
+sound profile). Click an artist's name in any list to open their page.
 """
 
 import html
@@ -58,14 +62,95 @@ SIMILAR_SQL = "SELECT name, artist, language, distance, track_id FROM similar_so
 # Every day the daily job has saved, newest first.
 CHART_DATES_SQL = "SELECT DISTINCT chart_date FROM chart_entries ORDER BY chart_date DESC"
 
-# One day's chart. track_id is NULL when the song isn't in the catalog,
-# and then the LEFT JOIN gives a NULL language too.
+# The newest saved chart before a given day. Usually yesterday, but it can
+# be further back if the daily job missed a day.
+PREV_DATE_SQL = "SELECT max(chart_date) FROM chart_entries WHERE chart_date < %s"
+
+# One day's chart, plus where each song was on the previous saved chart.
+# The "prev" part finds last chart's rank for each song (matched on
+# lower-cased name and artist, because Last.fm names are all we have for
+# songs that aren't in the catalog). prev_rank is NULL for a new entry.
+# The artist joins pick the catalog's spelling of the artist when the song
+# is in the catalog, so the artist link opens the right page.
 CHART_SQL = """
-SELECT c.rank, c.lastfm_track_name, c.lastfm_artist_name, c.listeners, c.track_id, t.language
+WITH prev AS (
+    SELECT lower(lastfm_track_name) AS song, lower(lastfm_artist_name) AS artist,
+           min(rank) AS rank
+    FROM chart_entries
+    WHERE chart_date = %(prev_day)s
+    GROUP BY 1, 2
+)
+SELECT c.rank, c.lastfm_track_name, c.lastfm_artist_name, c.listeners, c.track_id,
+       t.language, p.rank AS prev_rank, coalesce(a.name, c.lastfm_artist_name) AS link_artist
 FROM chart_entries c
 LEFT JOIN tracks t ON t.track_id = c.track_id
-WHERE c.chart_date = %s
+LEFT JOIN track_artists ta ON ta.track_id = c.track_id AND ta.position = 1
+LEFT JOIN artists a ON a.artist_id = ta.artist_id
+LEFT JOIN prev p ON p.song = lower(c.lastfm_track_name)
+                AND p.artist = lower(c.lastfm_artist_name)
+WHERE c.chart_date = %(day)s
 ORDER BY c.rank
+"""
+
+# Every artist with at least one song, most popular first, for the
+# artist picker.
+ARTIST_NAMES_SQL = """
+SELECT a.name
+FROM artists a
+JOIN track_artists ta ON ta.artist_id = a.artist_id
+JOIN tracks t ON t.track_id = ta.track_id
+GROUP BY a.name
+ORDER BY max(t.popularity) DESC NULLS LAST, a.name
+"""
+
+# One artist's songs, counted once each (the catalog lists some songs
+# several times), including songs where they're a featured artist.
+# Used by the two artist queries below.
+ARTIST_SONGS_CTE = """
+WITH songs AS (
+    SELECT DISTINCT ON (lower(t.name))
+           t.track_id, t.name, t.popularity, ta.position
+    FROM artists a
+    JOIN track_artists ta ON ta.artist_id = a.artist_id
+    JOIN tracks t ON t.track_id = ta.track_id
+    WHERE lower(a.name) = lower(%(artist)s)
+    ORDER BY lower(t.name), t.popularity DESC NULLS LAST
+)
+"""
+
+# The artist's songs with their chart history: how many days each one was
+# on the chart, its best rank and the last day it was there.
+ARTIST_SONGS_SQL = ARTIST_SONGS_CTE + """,
+charted AS (
+    SELECT lower(t.name) AS song, count(DISTINCT c.chart_date) AS days,
+           min(c.rank) AS best, max(c.chart_date) AS last_seen
+    FROM chart_entries c
+    JOIN tracks t ON t.track_id = c.track_id
+    JOIN track_artists ta ON ta.track_id = t.track_id
+    JOIN artists a ON a.artist_id = ta.artist_id
+    WHERE lower(a.name) = lower(%(artist)s)
+    GROUP BY 1
+)
+SELECT s.track_id, s.name, s.popularity, s.position, ch.days, ch.best, ch.last_seen
+FROM songs s
+LEFT JOIN charted ch ON ch.song = lower(s.name)
+ORDER BY ch.days DESC NULLS LAST, s.popularity DESC NULLS LAST
+LIMIT 50
+"""
+
+# The artist's average sound: the mean of each audio feature over their songs.
+ARTIST_PROFILE_SQL = ARTIST_SONGS_CTE + """
+SELECT avg(f.danceability), avg(f.energy), avg(f.valence), avg(f.acousticness),
+       avg(f.speechiness), avg(f.instrumentalness), avg(f.tempo), avg(f.loudness)
+FROM songs s
+JOIN audio_features f ON f.track_id = s.track_id
+"""
+
+# The same averages over the whole catalog, to compare against.
+CATALOG_PROFILE_SQL = """
+SELECT avg(danceability), avg(energy), avg(valence), avg(acousticness),
+       avg(speechiness), avg(instrumentalness), avg(tempo), avg(loudness)
+FROM audio_features
 """
 
 
@@ -116,22 +201,77 @@ def banner(kicker: str, title: str, sub: str) -> None:
     )
 
 
-def tracklist(headers: list[str], rows: list[list[str]]) -> None:
-    # Each row is [number, song, artist, Spotify link, right-hand cell html].
+def artist_link(name: str, link_name: str | None = None) -> str:
+    # The artist's name as a link to their artist page. target="_self" opens
+    # it in the same tab. link_name is the catalog's spelling, when it differs.
+    url = "?page=Artists&artist=" + quote(link_name or name)
+    return f'<a class="artist-link" href="{url}" target="_self">{html.escape(name)}</a>'
+
+
+def movement(rank: int, prev_rank: int | None) -> str:
+    # A green arrow up or red arrow down with how many spots the song moved
+    # since the previous chart, a gray dash if it stayed put, or NEW.
+    if prev_rank is None:
+        return '<span class="move new">NEW</span>'
+    if prev_rank > rank:
+        return f'<span class="move up">&#9650; {prev_rank - rank}</span>'
+    if prev_rank < rank:
+        return f'<span class="move down">&#9660; {rank - prev_rank}</span>'
+    return '<span class="move same">&#8211;</span>'
+
+
+def tracklist(headers: list[str], rows: list[list[str]], moves: list[str] | None = None) -> None:
+    # Each row is [number, song, artist html, Spotify link, right-hand cells html].
+    # moves, when given, is an extra cell per row after the number (the chart arrows).
     # The number turns into a play button when you point at the row
     # (style.css does that), and the button and the title both open Spotify.
     # target="_blank" opens the link in a new tab, so the app stays open.
+    # The artist html is usually artist_link(...), so it opens the artist page.
     head = "".join(f"<th>{h}</th>" for h in headers)
+    moves = moves or [None] * len(rows)
     body = "".join(
         f'<tr><td class="num"><span class="idx">{num}</span>'
         f'<a class="play" href="{html.escape(url)}" target="_blank">&#9654;</a></td>'
+        f'{"" if move is None else f"<td class=move-cell>{move}</td>"}'
         f'<td><a class="song" href="{html.escape(url)}" target="_blank">{html.escape(song)}</a>'
-        f'<div class="artist">{html.escape(artist)}</div></td>'
+        f'<div class="artist">{artist}</div></td>'
         f"{right}</tr>"
-        for num, song, artist, url, right in rows
+        for (num, song, artist, url, right), move in zip(rows, moves)
     )
     st.markdown(f'<table class="tracklist"><tr>{head}</tr>{body}</table>',
                 unsafe_allow_html=True)
+
+
+def sound_profile(artist_avg: tuple, catalog_avg: tuple) -> None:
+    # One bar per feature: green is the artist's average, the white tick is
+    # the average song in the catalog, so you can see what makes them stand out.
+    labels = ["Danceability", "Energy", "Happiness", "Acousticness",
+              "Speechiness", "Instrumentalness"]
+    bars = "".join(
+        f'<div class="bar-row"><div class="bar-label">{label}</div>'
+        f'<div class="bar"><div class="fill" style="width:{100 * float(a):.0f}%"></div>'
+        f'<div class="tick" style="left:{100 * float(c):.0f}%"></div></div>'
+        f'<div class="bar-value">{100 * float(a):.0f}</div></div>'
+        for label, a, c in zip(labels, artist_avg[:6], catalog_avg[:6])
+    )
+    st.markdown(
+        f'<div class="profile"><div class="profile-title">Sound profile</div>{bars}'
+        f'<div class="profile-note">Average tempo {float(artist_avg[6]):.0f} BPM, '
+        f'loudness {float(artist_avg[7]):.1f} dB. '
+        f'White tick = the average song in the catalog.</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+@st.cache_data(ttl=3600)
+def artist_names() -> list[str]:
+    # Remembered for an hour so the long list isn't fetched on every click.
+    return [r[0] for r in run_query(ARTIST_NAMES_SQL)]
+
+
+@st.cache_data(ttl=3600)
+def catalog_profile() -> tuple:
+    return run_query(CATALOG_PROFILE_SQL)[0]
 
 
 def show_similar(track_id: str, name: str, artist: str, language: str,
@@ -152,7 +292,7 @@ def show_similar(track_id: str, name: str, artist: str, language: str,
     # (distance 0.05 shows as 95%).
     tracklist(
         ["#", "Title", "Language", "Match"],
-        [[str(i), r[0], r[1], spotify_link(r[4], r[0], r[1]),
+        [[str(i), r[0], artist_link(r[1]), spotify_link(r[4], r[0], r[1]),
           f'<td class="lang">{html.escape(r[2] or "")}</td>'
           f'<td class="match">{max(0, round(100 * (1 - float(r[3]))))}%</td>']
          for i, r in enumerate(rows, start=1)],
@@ -168,9 +308,20 @@ with st.sidebar:
                 unsafe_allow_html=True)
     # format_func only changes what's shown: page is still "Search" or
     # "US top tracks". :material/...: puts a Google Material icon in the label.
-    icons = {"Search": ":material/search:", "US top tracks": ":material/trending_up:"}
-    page = st.radio("Go to", ["Search", "US top tracks"], label_visibility="collapsed",
+    icons = {"Search": ":material/search:", "US top tracks": ":material/trending_up:",
+             "Artists": ":material/person:"}
+    pages = list(icons)
+    # An artist link opens the app with ?page=Artists&artist=... in the
+    # address, so start on that page when it's there. Setting the menu's
+    # value in session_state (under its key) only happens on the first run.
+    if "page" not in st.session_state:
+        start = st.query_params.get("page")
+        st.session_state["page"] = start if start in pages else pages[0]
+    page = st.radio("Go to", pages, key="page", label_visibility="collapsed",
                     format_func=lambda p: f"{icons[p]}  {p}")
+# Leaving the Artists page clears the address, so a reload doesn't jump back.
+if page != "Artists" and st.query_params.get("page"):
+    st.query_params.clear()
 
 # ---------------------------------------------------------------------
 # Page 1: type a song, get similar songs
@@ -207,16 +358,18 @@ if page == "Search":
 # ---------------------------------------------------------------------
 # Page 2: the daily Last.fm chart
 # ---------------------------------------------------------------------
-else:
+elif page == "US top tracks":
     dates = [row[0] for row in run_query(CHART_DATES_SQL)]
     if not dates:
         st.info("No chart saved yet. Run pipelines/fetch_chart.py first.")
     else:
         day = st.sidebar.selectbox("Chart date", dates)
-        chart = run_query(CHART_SQL, (day,))
+        prev_day = run_query(PREV_DATE_SQL, (day,))[0][0]
+        chart = run_query(CHART_SQL, {"day": day, "prev_day": prev_day})
         matched = [row for row in chart if row[4] is not None]
+        compared = f"  -  arrows compare with {prev_day:%B %d}" if prev_day else ""
         banner("CHART", "US Top Tracks",
-               f"{day:%B %d, %Y}  -  {len(chart)} songs, {len(matched)} in the catalog")
+               f"{day:%B %d, %Y}  -  {len(chart)} songs, {len(matched)} in the catalog{compared}")
 
         # Only songs that are in the catalog have audio features to compare.
         if matched:
@@ -229,17 +382,64 @@ else:
                 placeholder="Pick a chart song",
             )
             if picked:
-                rank, name, chart_artist, listeners, track_id, language = labels[picked]
-                show_similar(track_id, name, chart_artist, language, 10, same_language)
+                r = labels[picked]
+                show_similar(r[4], r[1], r[2], r[5], 10, same_language)
 
+        # With no earlier chart to compare to, there are no arrows to show.
+        headers = ["#", "", "Title", "Language", "Listeners"] if prev_day else \
+                  ["#", "Title", "Language", "Listeners"]
         tracklist(
-            ["#", "Title", "Language", "Listeners"],
+            headers,
             [[str(r[0]),
               r[1],
-              r[2],
+              artist_link(r[2], r[7]),
               spotify_link(r[4], r[1], r[2]),
               f'<td class="lang">{html.escape(r[5] or "")}</td>'
               f'<td class="right">{"<span class=dot>&#9679;</span> " if r[4] else ""}'
               f'{(r[3] or 0):,}</td>']
              for r in chart],
+            moves=[movement(r[0], r[6]) for r in chart] if prev_day else None,
+        )
+
+# ---------------------------------------------------------------------
+# Page 3: one artist's songs, chart history and sound profile
+# ---------------------------------------------------------------------
+else:
+    names = artist_names()
+    # Pre-pick the artist from the address when you came from an artist
+    # link. Matching ignores upper/lower case.
+    if "artist_pick" not in st.session_state:
+        wanted = (st.query_params.get("artist") or "").lower()
+        st.session_state["artist_pick"] = next(
+            (n for n in names if n.lower() == wanted), None)
+    artist = st.selectbox("Artist", names, index=None, key="artist_pick",
+                          placeholder="Type an artist's name")
+    if not artist:
+        banner("ARTISTS", "Artist pages",
+               "Pick an artist to see their songs, their chart history and how they sound.")
+    else:
+        # Keep the address in step with the picked artist.
+        st.query_params["page"] = "Artists"
+        st.query_params["artist"] = artist
+        songs = run_query(ARTIST_SONGS_SQL, {"artist": artist})
+        profile = run_query(ARTIST_PROFILE_SQL, {"artist": artist})[0]
+        charted = [r for r in songs if r[4]]
+        sub = f"{len(songs)} song{'' if len(songs) == 1 else 's'} in the catalog"
+        if charted:
+            days = sum(r[4] for r in charted)
+            best = min(r[5] for r in charted)
+            sub += f"  -  {len(charted)} on the US chart, best rank #{best}, {days} chart days in total"
+        banner("ARTIST", artist, sub)
+
+        if profile[0] is not None:
+            sound_profile(profile, catalog_profile())
+
+        tracklist(
+            ["#", "Title", "On the chart", "Popularity"],
+            [[str(i), r[1], "featured" if r[3] > 1 else "",
+              spotify_link(r[0], r[1], artist),
+              f'<td class="lang">'
+              f'{f"{r[4]} days, best #{r[5]}, last {r[6]:%b %d}" if r[4] else ""}</td>'
+              f'<td class="right">{r[2] if r[2] is not None else ""}</td>']
+             for i, r in enumerate(songs, start=1)],
         )
