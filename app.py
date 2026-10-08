@@ -593,8 +593,8 @@ def chart_song_page(name: str, artist: str) -> None:
     days = run_query(CHART_SONG_SQL, {"name": name, "artist": artist})
     if days:
         chart_history(days)
-    st.caption("This song came out after the catalog ends (around 2022), so there are no "
-               "sound scores for it yet. pipelines/analyze_chart_songs.py can add them.")
+    st.caption("This song isn't in the catalog yet, so there are no sound scores for it. "
+               "The daily job adds new chart songs once it can find a preview to analyze.")
 
 
 st.set_page_config(page_title="SoundMatch", page_icon=":headphones:", layout="wide")
@@ -643,7 +643,7 @@ elif st.query_params.get("chart_song"):
 # ---------------------------------------------------------------------
 elif page == "Search" or page is None:
     banner("SEARCH", "Find similar songs",
-           "Type a song and get back songs that sound like it. The catalog stops around 2022.")
+           "Pick a song you love and discover tracks with the same vibe. Covers about 90,000 songs, plus new chart hits added every day.")
 
     left, right = st.columns([3, 1])
     with left:
