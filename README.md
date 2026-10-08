@@ -1,5 +1,7 @@
 ﻿# SoundMatch
 
+**Try it live: [soundmatch.streamlit.app](https://soundmatch.streamlit.app)**
+
 Type in a song and SoundMatch finds tracks with a similar feel, matched on energy, mood, tempo, danceability and more. It also records the US top 100 every day and tracks how songs move up and down the chart. Every song, artist and genre has its own page, and the search covers this week's new hits even though they're newer than its song data.
 
 Behind the app is an end-to-end data project I built from the ground up: a daily data pipeline, a Postgres database of about 90,000 songs, a similarity search written in SQL, a machine learning model that fills in missing data, and a web app that ties it all together.
@@ -30,7 +32,7 @@ Last.fm API  --daily--> staging.lastfm_chart_raw --003-->  chart_entries --004--
                                                           Streamlit app (app.py)
 ```
  
-Stack: Postgres 16 in Docker, Python 3 with psycopg 3, Streamlit, scikit-learn and librosa. Data comes from Kaggle, Last.fm and Deezer, all free.
+Stack: Postgres 16 in Docker, Python 3 with psycopg 3, Streamlit, scikit-learn and librosa. Data comes from Kaggle, Last.fm and Deezer, all free. The live site runs on Streamlit Community Cloud, with the database hosted on Neon.
 
 ## Design decisions
  
