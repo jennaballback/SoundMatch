@@ -1,5 +1,4 @@
-@'
-# SoundMatch
+﻿# SoundMatch
 
 Type in a song and SoundMatch finds tracks with a similar feel, matched on energy, mood, tempo, danceability and more. It also records the US top 100 every day and tracks how songs move up and down the chart. Every song, artist and genre has its own page, and the search covers this week's new hits even though they're newer than its song data.
 
@@ -102,4 +101,3 @@ streamlit run app.py
 ```
  
 To try it without downloading anything, `python pipelines/load_catalog.py data/sample_tracks.csv` loads a small made-up sample.
-'@ | Set-Content -Path README.md -Encoding utf8
