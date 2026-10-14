@@ -27,6 +27,7 @@ and the songs that sound most like it). The play button still opens Spotify.
 import altair as alt
 
 import html
+from datetime import date
 import os
 from urllib.parse import quote
 from pathlib import Path
@@ -238,6 +239,75 @@ WHERE g.name = %(genre)s
 """
 
 
+# Artists that sound like this one. Like SIMILAR_GENRES_SQL, but per artist:
+#   songs:     each artist's songs where they're the main artist, one copy each
+#   avgs:      each artist's average sound, tempo and loudness scaled to 0-1
+#   genres_of: every genre each artist has songs in, as a list (an array)
+# Then this artist ("me") is compared with every other artist. && means
+# "the two lists share at least one genre"; artists that share none get the
+# same 0.2 penalty similar_songs uses. Only artists with a few songs and at
+# least one well-known song count, so the list has names you might know.
+SIMILAR_ARTISTS_SQL = """
+WITH songs AS (
+    SELECT DISTINCT ON (ta.artist_id, lower(t.name))
+           ta.artist_id, t.track_id, t.popularity
+    FROM track_artists ta
+    JOIN tracks t ON t.track_id = ta.track_id
+    WHERE ta.position = 1
+    ORDER BY ta.artist_id, lower(t.name), t.popularity DESC NULLS LAST
+),
+avgs AS (
+    SELECT s.artist_id, count(*) AS songs, max(s.popularity) AS popularity,
+           avg(f.danceability) AS dance, avg(f.energy) AS energy,
+           avg(f.valence) AS happy, avg(f.acousticness) AS acoustic,
+           avg(f.speechiness) AS speech, avg(f.instrumentalness) AS instr,
+           avg(f.tempo) / 250 AS tempo, (avg(f.loudness) + 60) / 60 AS loud
+    FROM songs s
+    JOIN audio_features f ON f.track_id = s.track_id
+    GROUP BY s.artist_id
+),
+genres_of AS (
+    SELECT ta.artist_id, array_agg(DISTINCT tg.genre_id) AS genres
+    FROM track_artists ta
+    JOIN track_genres tg ON tg.track_id = ta.track_id
+    WHERE ta.position = 1
+    GROUP BY ta.artist_id
+),
+me AS (
+    SELECT avgs.*, a.name, g.genres
+    FROM avgs
+    JOIN artists a ON a.artist_id = avgs.artist_id
+    LEFT JOIN genres_of g ON g.artist_id = avgs.artist_id
+    WHERE lower(a.name) = lower(%(artist)s)
+    ORDER BY avgs.songs DESC
+    LIMIT 1
+)
+SELECT a.name,
+       sqrt(power(me.dance - o.dance, 2) + power(me.energy - o.energy, 2)
+          + power(me.happy - o.happy, 2) + power(me.acoustic - o.acoustic, 2)
+          + power(me.speech - o.speech, 2) + power(me.instr - o.instr, 2)
+          + power(me.tempo - o.tempo, 2) + power(me.loud - o.loud, 2)
+          + power(CASE WHEN g.genres && me.genres THEN 0 ELSE 0.2 END, 2)) AS distance
+FROM me
+JOIN avgs o ON o.artist_id <> me.artist_id
+JOIN artists a ON a.artist_id = o.artist_id AND lower(a.name) <> lower(me.name)
+LEFT JOIN genres_of g ON g.artist_id = o.artist_id
+WHERE o.songs >= %(min_songs)s AND o.popularity >= %(min_popularity)s
+ORDER BY distance
+LIMIT 8
+"""
+
+# How big the catalog is right now.
+CATALOG_NOW_SQL = """
+SELECT (SELECT count(*) FROM tracks),
+       (SELECT count(*) FROM tracks WHERE track_id LIKE 'deezer:%%'),
+       (SELECT count(*) FROM artists)
+"""
+
+# The catalog's size on every day the daily job counted it
+# (pipelines/count_catalog.py fills this table, see sql/008_catalog_counts.sql).
+CATALOG_HISTORY_SQL = "SELECT count_date, songs FROM catalog_counts ORDER BY count_date"
+
 # Everything about one song for its song page. The catalog lists some songs
 # several times (once per genre), so the genres are collected from every
 # copy with the same name and main artist.
@@ -374,6 +444,21 @@ def genre_link(name: str, extra: str = "") -> str:
     # A genre as a rounded "chip" that opens its genre page. extra is
     # small gray text after the name, like a song count or a match %.
     url = "?page=Genres&genre=" + quote(name)
+    small = f' <span class="chip-extra">{extra}</span>' if extra else ""
+    return f'<a class="genre-chip" href="{url}" target="_self">{html.escape(name)}{small}</a>'
+
+
+@st.cache_data(ttl=3600)
+def similar_artists(artist: str) -> list[tuple]:
+    # Comparing one artist with every other artist takes a moment, so each
+    # answer is remembered for an hour.
+    return run_query(SIMILAR_ARTISTS_SQL,
+                     {"artist": artist, "min_songs": 3, "min_popularity": 40})
+
+
+def artist_chip(name: str, extra: str = "") -> str:
+    # An artist as a chip like genre_link's, opening their artist page.
+    url = "?page=Artists&artist=" + quote(name)
     small = f' <span class="chip-extra">{extra}</span>' if extra else ""
     return f'<a class="genre-chip" href="{url}" target="_self">{html.escape(name)}{small}</a>'
 
@@ -535,6 +620,53 @@ def chart_history(days: list[tuple]) -> None:
     st.altair_chart(line, width="stretch")
 
 
+@st.cache_data(ttl=600)
+def catalog_size() -> tuple[tuple, list[tuple]]:
+    # The catalog's size now, plus its size on each day the daily job
+    # counted it. Remembered for 10 minutes. to_regclass is NULL when the
+    # catalog_counts table doesn't exist yet (before the first daily run).
+    now = run_query(CATALOG_NOW_SQL)[0]
+    has_table = run_query("SELECT to_regclass('catalog_counts')")[0][0]
+    return now, run_query(CATALOG_HISTORY_SQL) if has_table else []
+
+
+def catalog_tracker() -> None:
+    # Three numbers about the catalog, then a line of its size per day.
+    (songs, estimated, artists), history = catalog_size()
+    earlier = [r for r in history if r[0] < date.today()]
+    if earlier:
+        change = songs - earlier[-1][1]
+        since = (f'<span class="stat-up">{change:+,}</span>' if change > 0 else f"{change:+,}")             + f" since {earlier[-1][0]:%b %d}"
+    else:
+        since = "counted every day by the daily job"
+    tiles = [("Songs in the catalog", f"{songs:,}", since),
+             ("Added from the US chart", f"{estimated:,}", "new hits measured from previews"),
+             ("Artists", f"{artists:,}", "")]
+    st.markdown(
+        '<div class="section-title">The catalog</div><div class="stats">'
+        + "".join(f'<div class="stat"><div class="stat-label">{label}</div>'
+                  f'<div class="stat-value">{value}</div>'
+                  f'<div class="stat-sub">{sub}</div></div>'
+                  for label, value, sub in tiles)
+        + "</div>", unsafe_allow_html=True)
+    if len(history) < 2:
+        return
+    st.markdown('<div class="section-sub">Songs in the catalog, day by day</div>',
+                unsafe_allow_html=True)
+    # zero=False starts the axis near the numbers, so a few new songs a
+    # day still show as a rising line instead of a flat one.
+    data = [{"Day": f"{d:%Y-%m-%d}", "Songs": n} for d, n in history]
+    line = alt.Chart(alt.Data(values=data)).mark_line(
+        color="#1ed760", strokeWidth=2, point=alt.OverlayMarkDef(color="#1ed760", size=60)
+    ).encode(
+        x=alt.X("Day:T", title=None, axis=alt.Axis(format="%b %d", tickCount="day")),
+        y=alt.Y("Songs:Q", title="Songs", scale=alt.Scale(zero=False),
+                axis=alt.Axis(format=",d", tickMinStep=1)),
+        tooltip=[alt.Tooltip("Day:T", format="%B %d"), alt.Tooltip("Songs:Q", format=",")],
+    ).properties(height=180)
+    st.altair_chart(line, width="stretch")
+
+
 def song_page(track_id: str) -> None:
     back_button()
     found = run_query(SONG_SQL, (track_id,))
@@ -643,7 +775,7 @@ elif st.query_params.get("chart_song"):
 # ---------------------------------------------------------------------
 elif page == "Search" or page is None:
     banner("SEARCH", "Find similar songs",
-           "Pick a song you love and discover tracks with the same vibe. Covers about 90,000 songs, plus new chart hits added every day.")
+           "Pick a song you love and discover tracks with the same vibe.")
 
     left, right = st.columns([3, 1])
     with left:
@@ -669,6 +801,8 @@ elif page == "Search" or page is None:
                      how_many, same_language)
     elif typed:
         st.caption("Pick a song from the list to see songs that sound like it.")
+    else:
+        catalog_tracker()
 
 # ---------------------------------------------------------------------
 # Page 2: the daily Last.fm chart
@@ -753,6 +887,15 @@ elif page == "Artists":
 
         if profile[0] is not None:
             sound_profile(profile, catalog_profile())
+
+        # Match % works like the genres' one: distance 0.05 shows as 95%.
+        close = similar_artists(artist)
+        if close:
+            st.markdown('<div class="section-title">Similar artists</div>'
+                        '<div class="chips">'
+                        + "".join(artist_chip(name, f"{max(0, round(100 * (1 - float(d))))}%")
+                                  for name, d in close)
+                        + "</div>", unsafe_allow_html=True)
 
         tracklist(
             ["#", "Title", "On the chart", "Popularity"],

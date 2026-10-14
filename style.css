@@ -120,3 +120,10 @@ html, body, h1, h2, h3, p, label, input, .banner, .tracklist {
 /* Links in the line under a page title (artist and genres on song pages) */
 .banner .sub a { color: #ffffff !important; font-weight: 600; text-decoration: none; }
 .banner .sub a:hover { text-decoration: underline; }
+/* Search page: the catalog size tiles */
+.stats { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.6rem 0 1rem 0; }
+.stat { flex: 1 1 12rem; background-color: #181818; border-radius: 8px; padding: 1rem 1.2rem; }
+.stat-label { color: #b3b3b3; font-size: 0.9rem; }
+.stat-value { color: #ffffff; font-size: 2rem; font-weight: 700; line-height: 1.2; }
+.stat-sub { color: #b3b3b3; font-size: 0.85rem; min-height: 1.1rem; }
+.stat-up { color: #1ed760; font-weight: 600; }
