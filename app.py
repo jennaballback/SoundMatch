@@ -1,4 +1,4 @@
-﻿"""SoundMatch: the music project web app.
+"""SoundMatch: the music project web app.
 
 Run it with:
     streamlit run app.py
@@ -631,12 +631,13 @@ def catalog_size() -> tuple[tuple, list[tuple]]:
 
 
 def catalog_tracker() -> None:
-    # Three numbers about the catalog, then a line of its size per day.
+    # Three numbers about the catalog.
     (songs, estimated, artists), history = catalog_size()
     earlier = [r for r in history if r[0] < date.today()]
     if earlier:
         change = songs - earlier[-1][1]
-        since = (f'<span class="stat-up">{change:+,}</span>' if change > 0 else f"{change:+,}")             + f" since {earlier[-1][0]:%b %d}"
+        shown = f'<span class="stat-up">{change:+,}</span>' if change > 0 else f"{change:+,}"
+        since = f"{shown} since {earlier[-1][0]:%b %d}"
     else:
         since = "counted every day by the daily job"
     tiles = [("Songs in the catalog", f"{songs:,}", since),
@@ -649,22 +650,6 @@ def catalog_tracker() -> None:
                   f'<div class="stat-sub">{sub}</div></div>'
                   for label, value, sub in tiles)
         + "</div>", unsafe_allow_html=True)
-    if len(history) < 2:
-        return
-    st.markdown('<div class="section-sub">Songs in the catalog, day by day</div>',
-                unsafe_allow_html=True)
-    # zero=False starts the axis near the numbers, so a few new songs a
-    # day still show as a rising line instead of a flat one.
-    data = [{"Day": f"{d:%Y-%m-%d}", "Songs": n} for d, n in history]
-    line = alt.Chart(alt.Data(values=data)).mark_line(
-        color="#1ed760", strokeWidth=2, point=alt.OverlayMarkDef(color="#1ed760", size=60)
-    ).encode(
-        x=alt.X("Day:T", title=None, axis=alt.Axis(format="%b %d", tickCount="day")),
-        y=alt.Y("Songs:Q", title="Songs", scale=alt.Scale(zero=False),
-                axis=alt.Axis(format=",d", tickMinStep=1)),
-        tooltip=[alt.Tooltip("Day:T", format="%B %d"), alt.Tooltip("Songs:Q", format=",")],
-    ).properties(height=180)
-    st.altair_chart(line, width="stretch")
 
 
 def song_page(track_id: str) -> None:
