@@ -1,0 +1,174 @@
+﻿<!DOCTYPE html>
+<style>
+  html, body {
+    margin: 0; padding: 0; background: transparent; color: #ffffff;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+  .label { font-size: 14px; margin: 0 0 8px 0; }
+  .pick {
+    box-sizing: border-box; width: 100%; height: 40px; padding: 0 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: #242424; color: #ffffff; border: 1px solid transparent; border-radius: 8px;
+    font: 15px 'Helvetica Neue', Helvetica, Arial, sans-serif; cursor: pointer;
+  }
+  .pick:hover, .pick.open { border-color: #1ed760; }
+  .panel {
+    display: none; margin-top: 6px; padding: 10px;
+    background: #1c1c1c; border: 1px solid #2a2a2a; border-radius: 8px;
+  }
+  .panel.open { display: block; }
+  .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .month { font-weight: 700; font-size: 15px; }
+  .arrow {
+    width: 30px; height: 30px; border: none; border-radius: 50%;
+    background: transparent; color: #ffffff; font-size: 16px; cursor: pointer;
+  }
+  .arrow:hover:not(:disabled) { background: #2a2a2a; }
+  .arrow:disabled { color: #3e3e3e; cursor: default; }
+  .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+  .wd { color: #8a8a8a; font-size: 12px; padding: 4px 0; }
+  .day {
+    height: 30px; border: none; border-radius: 50%; padding: 0;
+    background: transparent; font: 14px 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+  .day.has { color: #ffffff; font-weight: 600; cursor: pointer; }
+  .day.has:hover { background: #2a2a2a; }
+  .day.none { color: #4a4a4a; cursor: default; }
+  .day.chosen, .day.chosen:hover { background: #1ed760; color: #000000; }
+  .note { color: #8a8a8a; font-size: 12px; margin-top: 8px; }
+</style>
+<div class="label">Chart date</div>
+<button class="pick" id="pick"><span id="shown"></span><span>&#9662;</span></button>
+<div class="panel" id="panel">
+  <div class="head">
+    <button class="arrow" id="prev" title="Previous month">&#8249;</button>
+    <div class="month" id="month"></div>
+    <button class="arrow" id="next" title="Next month">&#8250;</button>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="note">Grey days have no saved chart.</div>
+</div>
+
+<script>
+  // The chart date picker on the US top tracks page.
+  //
+  // app.py sends the days that have a saved chart (dates, as "2026-10-22")
+  // and the day being shown (selected). Click the box and a month calendar
+  // opens: saved days can be clicked, the rest are grey. Clicking a day
+  // sends it back to app.py, which shows that day's chart.
+
+  const pick = document.getElementById("pick");
+  const panel = document.getElementById("panel");
+  const shown = document.getElementById("shown");
+  const monthLabel = document.getElementById("month");
+  const grid = document.getElementById("grid");
+  const prev = document.getElementById("prev");
+  const next = document.getElementById("next");
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+                  "August", "September", "October", "November", "December"];
+
+  let saved = new Set();   // days with a chart, as "YYYY-MM-DD"
+  let first = "", last = "";
+  let selected = "";
+  let year = 0, month = 0; // the month on screen (month 0 = January)
+
+  // ---- Talking to Streamlit (same as song_search/index.html) ----------
+  function send(type, data) {
+    window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data), "*");
+  }
+  function setHeight() {
+    send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 4});
+  }
+
+  window.addEventListener("message", function (event) {
+    if (!event.data || event.data.type !== "streamlit:render") return;
+    const args = event.data.args || {};
+    const dates = (args.dates || []).slice().sort();
+    saved = new Set(dates);
+    first = dates[0] || "";
+    last = dates[dates.length - 1] || "";
+    selected = args.selected || last;
+    shown.textContent = pretty(selected);
+    showMonth(selected);
+  });
+
+  // ---- Drawing --------------------------------------------------------
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function iso(y, m, d) { return y + "-" + pad(m + 1) + "-" + pad(d); }
+  function pretty(day) {
+    if (!day) return "No charts yet";
+    const [y, m, d] = day.split("-").map(Number);
+    return MONTHS[m - 1] + " " + d + ", " + y;
+  }
+
+  function showMonth(day) {
+    if (!day) return;
+    const [y, m] = day.split("-").map(Number);
+    year = y; month = m - 1;
+    draw();
+  }
+
+  function draw() {
+    monthLabel.textContent = MONTHS[month] + " " + year;
+    grid.innerHTML = "";
+    for (const wd of ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]) {
+      const cell = document.createElement("div");
+      cell.className = "wd";
+      cell.textContent = wd;
+      grid.appendChild(cell);
+    }
+    // Empty cells before the 1st, so it lands on the right weekday.
+    const startsOn = new Date(year, month, 1).getDay();
+    for (let i = 0; i < startsOn; i++) grid.appendChild(document.createElement("div"));
+    const days = new Date(year, month + 1, 0).getDate();
+    for (let d = 1; d <= days; d++) {
+      const day = iso(year, month, d);
+      const cell = document.createElement("button");
+      cell.textContent = d;
+      if (saved.has(day)) {
+        cell.className = "day has" + (day === selected ? " chosen" : "");
+        cell.onclick = function () { choose(day); };
+      } else {
+        cell.className = "day none";
+        cell.disabled = true;
+      }
+      grid.appendChild(cell);
+    }
+    // Only allow moving to months that have saved charts in range.
+    prev.disabled = iso(year, month, 1) <= first;
+    next.disabled = iso(year, month, days) >= last;
+    setHeight();
+  }
+
+  function choose(day) {
+    selected = day;
+    shown.textContent = pretty(day);
+    close();
+    send("streamlit:setComponentValue", {value: day, dataType: "json"});
+  }
+
+  function close() {
+    panel.classList.remove("open");
+    pick.classList.remove("open");
+    setHeight();
+  }
+
+  pick.onclick = function () {
+    if (panel.classList.contains("open")) { close(); return; }
+    showMonth(selected);
+    panel.classList.add("open");
+    pick.classList.add("open");
+    setHeight();
+  };
+  prev.onclick = function () {
+    month -= 1; if (month < 0) { month = 11; year -= 1; }
+    draw();
+  };
+  next.onclick = function () {
+    month += 1; if (month > 11) { month = 0; year += 1; }
+    draw();
+  };
+
+  send("streamlit:componentReady", {apiVersion: 1});
+  setHeight();
+</script>

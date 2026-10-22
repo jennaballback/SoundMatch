@@ -370,6 +370,10 @@ def suggest_songs(text: str) -> list[dict]:
 # get back what you typed and which song you clicked.
 song_search_box = components.declare_component("song_search", path=str(ROOT / "song_search"))
 
+# The chart date picker, a month calendar of its own (chart_calendar/index.html).
+# It gets the days that have a saved chart and sends back the one you click.
+chart_calendar = components.declare_component("chart_calendar", path=str(ROOT / "chart_calendar"))
+
 
 def spotify_link(track_id: str | None, name: str, artist: str) -> str:
     # A catalog song links straight to its Spotify page. A chart song that
@@ -797,7 +801,13 @@ elif page == "US top tracks":
     if not dates:
         st.info("No chart saved yet. Run pipelines/fetch_chart.py first.")
     else:
-        day = st.sidebar.selectbox("Chart date", dates)
+        # The calendar sends back a day as text like "2026-10-22". Until you
+        # click one (or if it's not a saved day), the newest chart is shown.
+        saved = [d.isoformat() for d in dates]
+        with st.sidebar:
+            clicked = chart_calendar(dates=saved, selected=st.session_state.get("chart_day"),
+                                     key="chart_day", default=None)
+        day = date.fromisoformat(clicked) if clicked in saved else dates[0]
         prev_day = run_query(PREV_DATE_SQL, (day,))[0][0]
         chart = run_query(CHART_SQL, {"day": day, "prev_day": prev_day})
         matched = [row for row in chart if row[4] is not None]
