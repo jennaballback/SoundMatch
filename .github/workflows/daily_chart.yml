@@ -1,0 +1,39 @@
+﻿# The daily job, run by GitHub instead of my laptop.
+# Every day it saves the Last.fm US top 100, adds new chart songs to the
+# catalog and counts the catalog, all straight into the Neon database.
+# The database address and Last.fm key come from the repo's secrets
+# (Settings > Secrets and variables > Actions), never from the code.
+name: Daily chart
+
+on:
+  schedule:
+    - cron: "0 16 * * *"   # 16:00 UTC = 9am Pacific (8am in winter)
+  workflow_dispatch:        # adds a "Run workflow" button on the Actions tab
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install packages
+        run: pip install -r requirements.txt
+      - name: Save today's chart
+        run: python pipelines/fetch_chart.py
+      # The mood model file isn't in the repo (models/ is ignored), so it's
+      # trained fresh from the catalog each run. It takes about a minute.
+      - name: Train the mood model
+        run: python pipelines/train_mood_model.py
+      - name: Add new chart songs to the catalog
+        run: python pipelines/analyze_chart_songs.py
+      - name: Count the catalog
+        if: always()
+        run: python pipelines/count_catalog.py
